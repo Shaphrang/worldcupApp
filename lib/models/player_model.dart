@@ -1,0 +1,1 @@
+class PlayerModel { final String id, name, teamName; PlayerModel({required this.id, required this.name, required this.teamName}); factory PlayerModel.fromMap(Map<String,dynamic> m)=>PlayerModel(id:(m['id']??m['player_id']??'').toString(),name:(m['player_name']??m['name']??'Player').toString(),teamName:(m['team_name']??'').toString()); }
