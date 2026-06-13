@@ -1,0 +1,2 @@
+import 'package:flutter/material.dart';
+class AppTextField extends StatelessWidget{final TextEditingController controller;final String label;final bool obscure;final TextInputType? keyboardType;final String? Function(String?)? validator;const AppTextField({super.key,required this.controller,required this.label,this.obscure=false,this.keyboardType,this.validator});@override Widget build(BuildContext c)=>TextFormField(controller:controller,decoration:InputDecoration(labelText:label),obscureText:obscure,keyboardType:keyboardType,validator:validator);}

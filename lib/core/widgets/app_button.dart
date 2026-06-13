@@ -1,0 +1,2 @@
+import 'package:flutter/material.dart';
+class AppButton extends StatelessWidget{final String label;final VoidCallback? onPressed;final bool outlined,loading;const AppButton({super.key,required this.label,this.onPressed,this.outlined=false,this.loading=false});@override Widget build(BuildContext c){final child=loading?const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)):Text(label);return outlined?OutlinedButton(onPressed:loading?null:onPressed,child:child):FilledButton(onPressed:loading?null:onPressed,child:child);}}

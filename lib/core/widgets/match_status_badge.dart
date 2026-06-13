@@ -1,0 +1,2 @@
+import 'package:flutter/material.dart';
+class MatchStatusBadge extends StatelessWidget{final String label;const MatchStatusBadge({super.key,required this.label});@override Widget build(BuildContext c){final l=label.toLowerCase();final color=l.contains('open')?Colors.green:l.contains('lock')?Colors.orange:Colors.blueGrey;return Chip(label:Text(label),backgroundColor:color.withValues(alpha:.2),side:BorderSide(color:color));}}
