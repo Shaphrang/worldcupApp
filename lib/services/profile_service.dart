@@ -1,3 +1,4 @@
+//lib\services\profile_service.dart
 import '../core/config/supabase_config.dart';
 import '../models/app_user_profile.dart';
 
