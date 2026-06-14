@@ -6,7 +6,6 @@ import '../models/app_link_model.dart';
 import '../models/app_user_profile.dart';
 import '../models/fixture_model.dart';
 import '../models/popular_pick_model.dart';
-import '../models/prediction_model.dart';
 import '../models/sponsor_banner_model.dart';
 import 'app_link_service.dart';
 import 'auth_service.dart';

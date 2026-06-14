@@ -1,3 +1,4 @@
+//lib\features\home\widgets\home_section_card.dart
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -184,38 +185,90 @@ class HomeEmptyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 118,
-      padding: const EdgeInsets.all(13),
+      width: double.infinity,
+      constraints: const BoxConstraints(
+        minHeight: 112,
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
       decoration: BoxDecoration(
-        color: AppTheme.surface2.withOpacity(0.72),
+        color: AppTheme.surface2.withOpacity(0.84),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
         children: [
-          Icon(icon, color: Colors.white54, size: 25),
-          const SizedBox(height: 7),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 13.5,
+          Container(
+            height: 42,
+            width: 42,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.07),
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: Colors.white60,
+              size: 21,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontSize: 11.5),
-          ),
-          const SizedBox(height: 7),
-          SizedBox(
-            height: 30,
-            child: OutlinedButton(
-              onPressed: onTap,
-              child: Text(action),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.2,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10.8,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 28,
+                  child: OutlinedButton(
+                    onPressed: onTap,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      side: BorderSide(
+                        color: Colors.white.withOpacity(0.16),
+                      ),
+                      foregroundColor: Colors.white,
+                      textStyle: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    child: Text(
+                      action,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],

@@ -12,6 +12,8 @@ import '../../models/match_prize_pool_model.dart';
 import '../../models/sponsor_banner_model.dart';
 import '../../services/fixture_service.dart';
 import '../../services/prediction_service.dart';
+import '../../services/sponsor_banner_service.dart';
+
 
 class FixturesScreen extends StatefulWidget {
   const FixturesScreen({super.key});
@@ -22,6 +24,8 @@ class FixturesScreen extends StatefulWidget {
 
 class _FixturesScreenState extends State<FixturesScreen> {
   late Future<List<FixtureModel>> future;
+  bool _isRefreshing = false;
+  int _refreshTick = 0;
 
   @override
   void initState() {
@@ -40,11 +44,29 @@ class _FixturesScreenState extends State<FixturesScreen> {
   }
 
   Future<void> refresh() async {
-    setState(() {
-      future = loadFixtures();
-    });
+    if (_isRefreshing) return;
 
-    await future;
+    _isRefreshing = true;
+
+    SponsorBannerService.instance.clearCache();
+
+    final refreshed = loadFixtures();
+
+    if (mounted) {
+      setState(() {
+        _refreshTick++;
+        future = refreshed;
+      });
+    }
+
+    try {
+      await refreshed;
+    } catch (_) {
+      // FutureBuilder will show the error.
+      // Do not crash RefreshIndicator.
+    } finally {
+      _isRefreshing = false;
+    }
   }
 
   bool canPredict(FixtureModel fixture) {
@@ -103,10 +125,11 @@ class _FixturesScreenState extends State<FixturesScreen> {
   }
 
   List<Widget> _headerAndTopBanner() {
-    return const [
-      _PageHeader(),
-      SizedBox(height: 16),
+    return [
+      const _PageHeader(),
+      const SizedBox(height: 16),
       SponsorBannerSection(
+        key: ValueKey('fixtures-top-banner-$_refreshTick'),
         placement: SponsorBannerPlacement.fixtures,
         slot: SponsorBannerSlot.top,
         height: 104,
@@ -123,10 +146,13 @@ class _FixturesScreenState extends State<FixturesScreen> {
         child: SafeArea(
           bottom: false,
           child: RefreshIndicator(
-            color: AppTheme.teal,
-            backgroundColor: AppTheme.surface2,
-            onRefresh: refresh,
-            child: FutureBuilder<List<FixtureModel>>(
+              color: AppTheme.teal,
+              backgroundColor: AppTheme.surface2,
+              displacement: 42,
+              edgeOffset: 4,
+              triggerMode: RefreshIndicatorTriggerMode.onEdge,
+              onRefresh: refresh,
+              child: FutureBuilder<List<FixtureModel>>(
               future: future,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -178,7 +204,7 @@ class _FixturesScreenState extends State<FixturesScreen> {
                     parent: BouncingScrollPhysics(),
                   ),
                   padding: const EdgeInsets.fromLTRB(14, 18, 14, 110),
-                  itemCount: items.length + 2,
+                  itemCount: items.length + 3,
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return const _PageHeader();
@@ -210,6 +236,7 @@ class _FixturesScreenState extends State<FixturesScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(top: 6, bottom: 16),
                         child: SponsorBannerSection(
+                          key: ValueKey('fixtures-${item.slot}-banner-$_refreshTick'),
                           placement: item.placement,
                           slot: item.slot,
                           height: item.height,
@@ -228,6 +255,7 @@ class _FixturesScreenState extends State<FixturesScreen> {
                         child: _FixtureTile(
                           fixture: fixture,
                           canPredict: enabled,
+                          refreshTick: _refreshTick,
                           onTap: enabled
                               ? () => context.push('/fixtures/${fixture.id}')
                               : null,
@@ -434,11 +462,13 @@ class _DateHeader extends StatelessWidget {
 class _FixtureTile extends StatelessWidget {
   final FixtureModel fixture;
   final bool canPredict;
+  final int refreshTick;
   final VoidCallback? onTap;
 
   const _FixtureTile({
     required this.fixture,
     required this.canPredict,
+    required this.refreshTick,
     required this.onTap,
   });
 
@@ -539,7 +569,10 @@ class _FixtureTile extends StatelessWidget {
 
                 if (canPredict) ...[
                   const SizedBox(height: 12),
-                  _FixturePrizePool(matchId: fixture.id),
+                  _FixturePrizePool(
+                    matchId: fixture.id,
+                    refreshTick: refreshTick,
+                  ),
                 ],
 
                 const SizedBox(height: 12),
@@ -561,9 +594,11 @@ class _FixtureTile extends StatelessWidget {
 
 class _FixturePrizePool extends StatefulWidget {
   final String matchId;
+  final int refreshTick;
 
   const _FixturePrizePool({
     required this.matchId,
+    required this.refreshTick,
   });
 
   @override
@@ -585,7 +620,8 @@ class _FixturePrizePoolState extends State<_FixturePrizePool> {
   void didUpdateWidget(covariant _FixturePrizePool oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.matchId != widget.matchId) {
+    if (oldWidget.matchId != widget.matchId ||
+        oldWidget.refreshTick != widget.refreshTick) {
       _future = _service.matchPrizePool(widget.matchId);
     }
   }

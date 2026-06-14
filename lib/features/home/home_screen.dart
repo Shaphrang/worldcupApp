@@ -28,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _homeService = HomeService.instance;
 
   late Future<HomeData> _future;
+  bool _isRefreshing = false;
 
   @override
   void initState() {
@@ -36,9 +37,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refresh() async {
+    if (_isRefreshing) return;
+
+    _isRefreshing = true;
+
     final refreshed = _homeService.prepareHome(forceRefresh: true);
-    setState(() => _future = refreshed);
-    await refreshed;
+
+    if (mounted) {
+      setState(() {
+        _future = refreshed;
+      });
+    }
+
+    try {
+      await refreshed;
+    } catch (_) {
+      // FutureBuilder will show the error state.
+      // Do not crash RefreshIndicator.
+    } finally {
+      _isRefreshing = false;
+    }
   }
 
   void _openFixtures() => context.go('/fixtures');
@@ -61,10 +79,13 @@ class _HomeScreenState extends State<HomeScreen> {
         child: SafeArea(
           bottom: false,
           child: RefreshIndicator(
-            color: AppTheme.teal,
-            backgroundColor: AppTheme.surface2,
-            onRefresh: _refresh,
-            child: FutureBuilder<HomeData>(
+              color: AppTheme.teal,
+              backgroundColor: AppTheme.surface2,
+              displacement: 42,
+              edgeOffset: 4,
+              triggerMode: RefreshIndicatorTriggerMode.onEdge,
+              onRefresh: _refresh,
+              child: FutureBuilder<HomeData>(
               future: _future,
               initialData: _homeService.takePreparedData(),
               builder: (context, snapshot) {
@@ -81,7 +102,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 return ListView(
                   physics: const AlwaysScrollableScrollPhysics(
-                    parent: ClampingScrollPhysics(),
+                    parent: BouncingScrollPhysics(),
                   ),
                   padding: const EdgeInsets.fromLTRB(14, 10, 14, 100),
                   children: [

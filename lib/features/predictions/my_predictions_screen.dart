@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_time_utils.dart';
@@ -6,6 +7,7 @@ import '../../core/widgets/empty_view.dart';
 import '../../core/widgets/loading_view.dart';
 import '../../core/widgets/match_prize_pool_card.dart';
 import '../../core/widgets/sponsor_banner_section.dart';
+import '../../models/fixture_model.dart';
 import '../../models/match_prize_pool_model.dart';
 import '../../models/prediction_model.dart';
 import '../../models/sponsor_banner_model.dart';
@@ -23,14 +25,16 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
 
   bool _loading = true;
   bool _loadingPredictions = false;
-  bool _loadingPrizePool = false;
+  bool _loadingNextPrize = false;
+  bool _isRefreshing = false;
+  int _refreshTick = 0;
 
   String? _error;
   String? _selectedMatchId;
 
   List<PredictionMatchFilter> _matches = [];
   List<PredictionModel> _predictions = [];
-  MatchPrizePoolModel? _prizePool;
+  _NextPredictionPrizeData? _nextPrizeData;
 
   PredictionMatchFilter? get _selectedMatch {
     final id = _selectedMatchId;
@@ -50,25 +54,57 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
     _loadInitial();
   }
 
+  Future<_NextPredictionPrizeData?> _loadNextPredictionPrizeData() async {
+    try {
+      final match = await _service.nextUpcomingPredictionMatch();
+
+      if (match == null) {
+        return null;
+      }
+
+      final results = await Future.wait<Object?>([
+        _service.matchPrizePool(match.id),
+        _service.myPredictionForMatch(match.id),
+      ]);
+
+      return _NextPredictionPrizeData(
+        match: match,
+        prizePool: results[0] as MatchPrizePoolModel?,
+        userPrediction: results[1] as UserMatchPrediction?,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _loadInitial() async {
     setState(() {
       _loading = true;
+      _loadingNextPrize = true;
       _error = null;
       _predictions = [];
-      _prizePool = null;
+      _nextPrizeData = null;
     });
 
     try {
-      final matches = await _service.completedPredictionMatches();
+      final results = await Future.wait<Object?>([
+        _service.completedPredictionMatches(),
+        _loadNextPredictionPrizeData(),
+      ]);
 
       if (!mounted) return;
+
+      final matches = results[0] as List<PredictionMatchFilter>;
+      final nextPrizeData = results[1] as _NextPredictionPrizeData?;
 
       final firstMatchId = matches.isEmpty ? null : matches.first.id;
 
       setState(() {
         _matches = matches;
         _selectedMatchId = firstMatchId;
+        _nextPrizeData = nextPrizeData;
         _loading = false;
+        _loadingNextPrize = false;
       });
 
       if (firstMatchId != null) {
@@ -79,6 +115,7 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
 
       setState(() {
         _loading = false;
+        _loadingNextPrize = false;
         _error = '$error';
       });
     }
@@ -87,11 +124,9 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
   Future<void> _loadSelectedMatchData(String matchId) async {
     setState(() {
       _loadingPredictions = true;
-      _loadingPrizePool = true;
       _error = null;
       _selectedMatchId = matchId;
       _predictions = [];
-      _prizePool = null;
     });
 
     try {
@@ -109,53 +144,79 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
 
         setState(() {
           _predictions = [];
-          _prizePool = null;
           _loadingPredictions = false;
-          _loadingPrizePool = false;
         });
 
         return;
       }
 
-      final predictionsFuture = _service.publicPredictionsForMatch(
+      final predictions = await _service.publicPredictionsForMatch(
         match: match,
         limit: 100,
         offset: 0,
       );
 
-      final prizePoolFuture = _service.matchPrizePool(matchId);
-
-      final predictions = await predictionsFuture;
-      final prizePool = await prizePoolFuture;
-
       if (!mounted) return;
 
       setState(() {
         _predictions = predictions;
-        _prizePool = prizePool;
         _loadingPredictions = false;
-        _loadingPrizePool = false;
       });
     } catch (error) {
       if (!mounted) return;
 
       setState(() {
         _loadingPredictions = false;
-        _loadingPrizePool = false;
         _error = '$error';
       });
     }
   }
 
   Future<void> _refresh() async {
-    final selected = _selectedMatchId;
+    if (_isRefreshing) return;
 
-    if (selected == null) {
-      await _loadInitial();
-      return;
+    _isRefreshing = true;
+
+    if (mounted) {
+      setState(() {
+        _refreshTick++;
+        _loadingNextPrize = true;
+      });
     }
 
-    await _loadSelectedMatchData(selected);
+    try {
+      final selected = _selectedMatchId;
+
+      if (selected == null) {
+        await _loadInitial();
+        return;
+      }
+
+      final nextPrizeFuture = _loadNextPredictionPrizeData();
+      final selectedFuture = _loadSelectedMatchData(selected);
+
+      final nextPrizeData = await nextPrizeFuture;
+      await selectedFuture;
+
+      if (!mounted) return;
+
+      setState(() {
+        _nextPrizeData = nextPrizeData;
+        _loadingNextPrize = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadingNextPrize = false;
+        });
+      }
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  void _openPredictNow(FixtureModel match) {
+    context.push('/fixtures/${match.id}');
   }
 
   @override
@@ -168,6 +229,9 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
               : RefreshIndicator(
                   color: AppTheme.teal,
                   backgroundColor: AppTheme.surface2,
+                  displacement: 42,
+                  edgeOffset: 4,
+                  triggerMode: RefreshIndicatorTriggerMode.onEdge,
                   onRefresh: _refresh,
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(
@@ -176,23 +240,29 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 18, 16, 110),
                     children: [
                       const _PageHeader(),
-
                       const SizedBox(height: 14),
-
-                      const SponsorBannerSection(
+                      SponsorBannerSection(
+                        key: ValueKey(
+                          'my-predictions-top-banner-$_refreshTick',
+                        ),
                         placement: SponsorBannerPlacement.myPredictions,
                         slot: SponsorBannerSlot.top,
                         height: 104,
                         limit: 5,
                         autoPlay: true,
                       ),
-
                       const SizedBox(height: 14),
 
-                      if (_matches.isNotEmpty) ...[
-                        MatchPrizePoolCard(
-                          prizePool: _prizePool,
-                          loading: _loadingPrizePool,
+                      if (_loadingNextPrize) ...[
+                        const MatchPrizePoolCard(
+                          prizePool: null,
+                          loading: true,
+                        ),
+                        const SizedBox(height: 14),
+                      ] else if (_nextPrizeData != null) ...[
+                        _NextPredictionPrizeCard(
+                          data: _nextPrizeData!,
+                          onPredictNow: _openPredictNow,
                         ),
                         const SizedBox(height: 14),
                       ],
@@ -217,7 +287,7 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
                           selectedMatchId: _selectedMatchId,
                           selectedMatch: _selectedMatch,
                           totalPredictions: _predictions.length,
-                          loading: _loadingPredictions || _loadingPrizePool,
+                          loading: _loadingPredictions,
                           onChanged: (matchId) {
                             if (matchId == null ||
                                 matchId == _selectedMatchId) {
@@ -227,34 +297,28 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
                             _loadSelectedMatchData(matchId);
                           },
                         ),
-
                         const SizedBox(height: 14),
-
                         _SummaryStrip(
                           match: _selectedMatch,
                           predictions: _predictions,
                         ),
-
                         const SizedBox(height: 14),
-
-                        const SizedBox(height: 14),
-
-                        const SponsorBannerSection(
+                        SponsorBannerSection(
+                          key: ValueKey(
+                            'my-predictions-middle-banner-$_refreshTick',
+                          ),
                           placement: SponsorBannerPlacement.myPredictions,
                           slot: SponsorBannerSlot.middle,
                           height: 96,
                           limit: 5,
                           autoPlay: true,
                         ),
-
                         const SizedBox(height: 14),
-
                         if (_loadingPredictions)
                           const _NativeLoadingCard()
                         else if (_predictions.isEmpty)
                           const EmptyView(
-                            message:
-                                'No predictions found for this match.',
+                            message: 'No predictions found for this match.',
                           )
                         else
                           ...List.generate(_predictions.length, (index) {
@@ -279,6 +343,277 @@ class _MyPredictionsScreenState extends State<MyPredictionsScreen> {
       ),
     );
   }
+}
+
+class _NextPredictionPrizeCard extends StatelessWidget {
+  final _NextPredictionPrizeData data;
+  final ValueChanged<FixtureModel> onPredictNow;
+
+  const _NextPredictionPrizeCard({
+    required this.data,
+    required this.onPredictNow,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final match = data.match;
+    final alreadyPredicted = data.userPrediction != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        MatchPrizePoolCard(
+          prizePool: data.prizePool,
+          loading: false,
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.surface2.withOpacity(0.96),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 10),
+              ),
+            ],
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppTheme.gold.withOpacity(0.10),
+                AppTheme.surface2.withOpacity(0.96),
+                AppTheme.surface.withOpacity(0.96),
+              ],
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Next prediction match',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _UpcomingTeamMini(
+                      name: match.teamAName,
+                      shortName: match.teamAShort,
+                      flagUrl: match.teamAFlagUrl,
+                      alignEnd: false,
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.gold.withOpacity(0.13),
+                      borderRadius: BorderRadius.circular(100),
+                      border: Border.all(
+                        color: AppTheme.gold.withOpacity(0.24),
+                      ),
+                    ),
+                    child: const Text(
+                      'VS',
+                      style: TextStyle(
+                        color: AppTheme.gold,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _UpcomingTeamMini(
+                      name: match.teamBName,
+                      shortName: match.teamBShort,
+                      flagUrl: match.teamBFlagUrl,
+                      alignEnd: true,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (match.stage.trim().isNotEmpty)
+                    _MiniInfoPill(
+                      icon: Icons.emoji_events_rounded,
+                      label: match.stage.trim(),
+                      color: AppTheme.gold,
+                    ),
+                  _MiniInfoPill(
+                    icon: Icons.schedule_rounded,
+                    label: DateTimeUtils.format(match.matchStartAt),
+                    color: AppTheme.teal,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 13),
+              if (alreadyPredicted)
+                const _AlreadyPredictedBox()
+              else
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: () => onPredictNow(match),
+                    icon: const Icon(
+                      Icons.sports_soccer_rounded,
+                      size: 19,
+                    ),
+                    label: const Text('Predict Now'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF4D00),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _UpcomingTeamMini extends StatelessWidget {
+  final String name;
+  final String? shortName;
+  final String? flagUrl;
+  final bool alignEnd;
+
+  const _UpcomingTeamMini({
+    required this.name,
+    required this.shortName,
+    required this.flagUrl,
+    required this.alignEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = shortName?.trim().isNotEmpty == true ? shortName! : name;
+
+    return Row(
+      mainAxisAlignment:
+          alignEnd ? MainAxisAlignment.end : MainAxisAlignment.start,
+      children: [
+        if (!alignEnd) _FlagBubble(flagUrl: flagUrl),
+        if (!alignEnd) const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment:
+                alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: alignEnd ? TextAlign.end : TextAlign.start,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: alignEnd ? TextAlign.end : TextAlign.start,
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (alignEnd) const SizedBox(width: 8),
+        if (alignEnd) _FlagBubble(flagUrl: flagUrl),
+      ],
+    );
+  }
+}
+
+class _AlreadyPredictedBox extends StatelessWidget {
+  const _AlreadyPredictedBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 12,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.gold.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.gold.withOpacity(0.22),
+        ),
+      ),
+      child: const Row(
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            color: AppTheme.gold,
+            size: 19,
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Prediction submitted. Wait for others to predict.',
+              style: TextStyle(
+                color: AppTheme.gold,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w900,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NextPredictionPrizeData {
+  final FixtureModel match;
+  final MatchPrizePoolModel? prizePool;
+  final UserMatchPrediction? userPrediction;
+
+  const _NextPredictionPrizeData({
+    required this.match,
+    required this.prizePool,
+    required this.userPrediction,
+  });
 }
 
 class _PageHeader extends StatelessWidget {
@@ -333,7 +668,7 @@ class _PageHeader extends StatelessWidget {
                 ),
                 SizedBox(height: 5),
                 Text(
-                  'See all users’ picks by completed match.',
+                  'Check the prize and predict the next match.',
                   style: TextStyle(
                     color: Colors.white54,
                     fontSize: 12,
@@ -444,16 +779,20 @@ class _MatchFilterCard extends StatelessWidget {
             const SizedBox(height: 12),
             Row(
               children: [
-                _MiniInfoPill(
-                  icon: Icons.groups_rounded,
-                  label: '$totalPredictions predictions',
-                  color: AppTheme.blue,
+                Flexible(
+                  child: _MiniInfoPill(
+                    icon: Icons.groups_rounded,
+                    label: '$totalPredictions predictions',
+                    color: AppTheme.blue,
+                  ),
                 ),
                 const SizedBox(width: 8),
-                _MiniInfoPill(
-                  icon: Icons.emoji_events_rounded,
-                  label: 'Final ${match.scoreText}',
-                  color: AppTheme.gold,
+                Flexible(
+                  child: _MiniInfoPill(
+                    icon: Icons.emoji_events_rounded,
+                    label: 'Final ${match.scoreText}',
+                    color: AppTheme.gold,
+                  ),
                 ),
               ],
             ),
@@ -1198,33 +1537,31 @@ class _MiniInfoPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Flexible(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.09),
-          borderRadius: BorderRadius.circular(100),
-          border: Border.all(color: color.withOpacity(0.17)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 14),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w900,
-                ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(color: color.withOpacity(0.17)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

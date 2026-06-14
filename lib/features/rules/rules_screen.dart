@@ -3,17 +3,56 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/sponsor_banner_section.dart';
 import '../../models/sponsor_banner_model.dart';
+import '../../services/app_link_service.dart';
+import '../../services/sponsor_banner_service.dart';
+import '../home/widgets/join_whatsapp_group_section.dart';
 
-class RulesScreen extends StatelessWidget {
+class RulesScreen extends StatefulWidget {
   const RulesScreen({super.key});
+
+  @override
+  State<RulesScreen> createState() => _RulesScreenState();
+}
+
+class _RulesScreenState extends State<RulesScreen> {
+  bool _isRefreshing = false;
+  int _refreshTick = 0;
+
+  Future<void> _refresh() async {
+    if (_isRefreshing) return;
+
+    _isRefreshing = true;
+
+    try {
+      SponsorBannerService.instance.clearCache();
+      AppLinkService.instance.clearCache();
+
+      if (mounted) {
+        setState(() {
+          _refreshTick++;
+        });
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    } finally {
+      _isRefreshing = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       color: AppTheme.background,
-      child: SafeArea(
-        bottom: false,
-        child: CustomScrollView(
+          child: SafeArea(
+            bottom: false,
+            child: RefreshIndicator(
+              color: AppTheme.teal,
+              backgroundColor: AppTheme.surface2,
+              displacement: 42,
+              edgeOffset: 4,
+              triggerMode: RefreshIndicatorTriggerMode.onEdge,
+              onRefresh: _refresh,
+              child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(
             parent: BouncingScrollPhysics(),
           ),
@@ -23,12 +62,13 @@ class RulesScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     _RulesHero(),
 
                     SizedBox(height: 14),
 
                     SponsorBannerSection(
+                      key: ValueKey('rules-top-banner-$_refreshTick'),
                       placement: SponsorBannerPlacement.rules,
                       slot: SponsorBannerSlot.top,
                       height: 104,
@@ -59,8 +99,9 @@ class RulesScreen extends StatelessWidget {
                     SizedBox(height: 14),
 
                     SponsorBannerSection(
+                      key: ValueKey('rules-middle-banner-$_refreshTick'),
                       placement: SponsorBannerPlacement.rules,
-                      slot: SponsorBannerSlot.bottom,
+                      slot: SponsorBannerSlot.middle,
                       height: 96,
                       limit: 5,
                       autoPlay: true,
@@ -68,12 +109,19 @@ class RulesScreen extends StatelessWidget {
 
                     SizedBox(height: 14),
 
-                    _FinalDecisionCard(),
+                    const _FinalDecisionCard(),
+
+                    const SizedBox(height: 14),
+
+                    JoinWhatsAppGroupSection(
+                      key: ValueKey('rules-whatsapp-group-$_refreshTick'),
+                    ),
                   ],
                 ),
               ),
             ),
           ],
+          ),
         ),
       ),
     );

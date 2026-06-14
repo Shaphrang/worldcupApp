@@ -50,22 +50,23 @@ class PredictionService {
     }
   }
 
-Future<List<ParticipantModel>> participants(String matchId) async {
-  final data = await _db.rpc(
-    'get_match_participants',
-    params: {
-      'p_match_id': matchId,
-    },
-  );
+  Future<List<ParticipantModel>> participants(String matchId) async {
+    final data = await _db.rpc(
+      'get_match_participants',
+      params: {
+        'p_match_id': matchId,
+      },
+    );
 
-  return (data as List)
-      .map(
-        (item) => ParticipantModel.fromMap(
-          Map<String, dynamic>.from(item as Map),
-        ),
-      )
-      .toList();
-}
+    return (data as List)
+        .map(
+          (item) => ParticipantModel.fromMap(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
   Future<List<PredictionModel>> myPredictions() async {
     final userId = _db.auth.currentUser?.id;
 
@@ -358,6 +359,56 @@ Future<List<ParticipantModel>> participants(String matchId) async {
     return items.take(limit).toList();
   }
 
+  Future<FixtureModel?> nextUpcomingPredictionMatch() async {
+    try {
+      final nowUtc = DateTime.now().toUtc().toIso8601String();
+
+      final data = await _db
+          .from('fixtures_view')
+          .select(
+            'id, match_title, stage, match_start_at, prediction_lock_at, status, team_a_score, team_b_score, team_a_name, team_b_name, team_a_short_name, team_b_short_name, team_a_flag_url, team_b_flag_url',
+          )
+          .gt('match_start_at', nowUtc)
+          .order('match_start_at', ascending: true)
+          .limit(30);
+
+      final rows = (data as List)
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      for (final row in rows) {
+        final status = _text(row['status']).toLowerCase();
+
+        final isCompleted = status == 'completed' ||
+            status == 'finished' ||
+            status == 'full_time' ||
+            status == 'full time' ||
+            status == 'ft' ||
+            status == 'finalized' ||
+            status == 'cancelled' ||
+            status == 'canceled';
+
+        if (isCompleted) continue;
+
+        final fixture = FixtureModel.fromMap(row);
+
+        if (fixture.id.trim().isNotEmpty) {
+          return fixture;
+        }
+      }
+
+      return null;
+    } catch (error, stackTrace) {
+      developer.log(
+        'Failed to load next upcoming prediction match',
+        error: error,
+        stackTrace: stackTrace,
+      );
+
+      return null;
+    }
+  }
+
   Future<List<PredictionMatchFilter>> completedPredictionMatches() async {
     final data = await _db
         .from('fixtures_view')
@@ -388,35 +439,36 @@ Future<List<ParticipantModel>> participants(String matchId) async {
   }
 
   Future<List<PredictionModel>> publicPredictionsForMatch({
-      required PredictionMatchFilter match,
-      int limit = 100,
-      int offset = 0,
-    }) async {
-      final data = await _db.rpc(
-        'get_public_match_predictions',
-        params: {
-          'p_match_id': match.id,
-          'p_limit': limit,
-          'p_offset': offset,
-        },
-      );
+    required PredictionMatchFilter match,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final data = await _db.rpc(
+      'get_public_match_predictions',
+      params: {
+        'p_match_id': match.id,
+        'p_limit': limit,
+        'p_offset': offset,
+      },
+    );
 
-      return (data as List).map((item) {
-        final row = Map<String, dynamic>.from(item as Map);
+    return (data as List).map((item) {
+      final row = Map<String, dynamic>.from(item as Map);
 
-        return PredictionModel.fromMap({
-          ...row,
-          'match_title': match.matchTitle,
-          'stage': match.stage,
-          'team_a_name': match.teamAName,
-          'team_b_name': match.teamBName,
-          'team_a_short_name': match.teamAShortName,
-          'team_b_short_name': match.teamBShortName,
-          'team_a_flag_url': match.teamAFlagUrl,
-          'team_b_flag_url': match.teamBFlagUrl,
-        });
-      }).toList();
-    }
+      return PredictionModel.fromMap({
+        ...row,
+        'match_title': match.matchTitle,
+        'stage': match.stage,
+        'team_a_name': match.teamAName,
+        'team_b_name': match.teamBName,
+        'team_a_short_name': match.teamAShortName,
+        'team_b_short_name': match.teamBShortName,
+        'team_a_flag_url': match.teamAFlagUrl,
+        'team_b_flag_url': match.teamBFlagUrl,
+      });
+    }).toList();
+  }
+
   Future<List<PredictionModel>> allPredictionsForMatch(String matchId) async {
     if (matchId.trim().isEmpty) {
       return [];
@@ -492,34 +544,35 @@ Future<List<ParticipantModel>> participants(String matchId) async {
     return predictions;
   }
 
-Future<MatchPrizePoolModel?> matchPrizePool(String matchId) async {
-  if (matchId.trim().isEmpty) {
-    return null;
-  }
+  Future<MatchPrizePoolModel?> matchPrizePool(String matchId) async {
+    if (matchId.trim().isEmpty) {
+      return null;
+    }
 
-  final response = await _db.rpc(
-    'get_match_prize_pool',
-    params: {
-      'p_match_id': matchId,
-    },
-  );
+    final response = await _db.rpc(
+      'get_match_prize_pool',
+      params: {
+        'p_match_id': matchId,
+      },
+    );
 
-  if (response == null) return null;
+    if (response == null) return null;
 
-  if (response is List) {
-    if (response.isEmpty) return null;
+    if (response is List) {
+      if (response.isEmpty) return null;
 
-    final first = response.first;
+      final first = response.first;
+
+      return MatchPrizePoolModel.fromMap(
+        Map<String, dynamic>.from(first as Map),
+      );
+    }
 
     return MatchPrizePoolModel.fromMap(
-      Map<String, dynamic>.from(first as Map),
+      Map<String, dynamic>.from(response as Map),
     );
   }
 
-  return MatchPrizePoolModel.fromMap(
-    Map<String, dynamic>.from(response as Map),
-  );
-}
   String _text(dynamic value) {
     if (value == null) {
       return '';

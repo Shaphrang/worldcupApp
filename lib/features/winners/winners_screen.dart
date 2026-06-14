@@ -24,6 +24,8 @@ class _WinnersScreenState extends State<WinnersScreen> {
   bool _loading = true;
   bool _loadingWinners = false;
   bool _loadingPrizePool = false;
+  bool _isRefreshing = false;
+  int _refreshTick = 0;
 
   String? _error;
   String? _selectedMatchId;
@@ -172,14 +174,31 @@ class _WinnersScreenState extends State<WinnersScreen> {
   }
 
   Future<void> _refresh() async {
-    final selected = _selectedMatchId;
+    if (_isRefreshing) return;
 
-    if (selected == null) {
-      await _loadInitial();
-      return;
+    _isRefreshing = true;
+
+    if (mounted) {
+      setState(() {
+        _refreshTick++;
+      });
     }
 
-    await _loadSelectedMatchData(selected);
+    try {
+      final selected = _selectedMatchId;
+
+      if (selected == null) {
+        await _loadInitial();
+        return;
+      }
+
+      await _loadSelectedMatchData(selected);
+    } catch (_) {
+      // Error is already handled inside _loadInitial or _loadSelectedMatchData.
+      // Do not crash RefreshIndicator.
+    } finally {
+      _isRefreshing = false;
+    }
   }
 
   @override
@@ -194,10 +213,13 @@ class _WinnersScreenState extends State<WinnersScreen> {
           child: _loading
               ? const LoadingView()
               : RefreshIndicator(
-                  color: AppTheme.gold,
-                  backgroundColor: const Color(0xFF091827),
-                  onRefresh: _refresh,
-                  child: ListView(
+                    color: AppTheme.gold,
+                    backgroundColor: const Color(0xFF091827),
+                    displacement: 42,
+                    edgeOffset: 4,
+                    triggerMode: RefreshIndicatorTriggerMode.onEdge,
+                    onRefresh: _refresh,
+                    child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
                     ),
@@ -207,7 +229,8 @@ class _WinnersScreenState extends State<WinnersScreen> {
 
                       const SizedBox(height: 14),
 
-                      const SponsorBannerSection(
+                      SponsorBannerSection(
+                        key: ValueKey('winners-top-banner-$_refreshTick'),
                         placement: SponsorBannerPlacement.winners,
                         slot: SponsorBannerSlot.top,
                         height: 104,
@@ -257,7 +280,8 @@ class _WinnersScreenState extends State<WinnersScreen> {
 
                         const SizedBox(height: 14),
 
-                        const SponsorBannerSection(
+                        SponsorBannerSection(
+                          key: ValueKey('winners-middle-banner-$_refreshTick'),
                           placement: SponsorBannerPlacement.winners,
                           slot: SponsorBannerSlot.middle,
                           height: 96,
