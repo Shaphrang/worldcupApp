@@ -6,7 +6,12 @@ import '../../../models/app_link_model.dart';
 import '../../../services/app_link_service.dart';
 
 class JoinWhatsAppGroupSection extends StatefulWidget {
-  const JoinWhatsAppGroupSection({super.key});
+  final AppLinkModel? link;
+
+  const JoinWhatsAppGroupSection({
+    super.key,
+    this.link,
+  });
 
   @override
   State<JoinWhatsAppGroupSection> createState() =>
@@ -21,7 +26,16 @@ class _JoinWhatsAppGroupSectionState extends State<JoinWhatsAppGroupSection> {
   @override
   void initState() {
     super.initState();
-    _future = _loadLink();
+    _future = widget.link != null ? Future.value(widget.link) : _loadLink();
+  }
+
+
+  @override
+  void didUpdateWidget(covariant JoinWhatsAppGroupSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.link != widget.link && widget.link != null) {
+      _future = Future.value(widget.link);
+    }
   }
 
   Future<AppLinkModel?> _loadLink() {

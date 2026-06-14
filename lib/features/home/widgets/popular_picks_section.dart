@@ -8,7 +8,12 @@ import '../../../services/popular_picks_service.dart';
 import 'home_section_card.dart';
 
 class PopularPicksSection extends StatefulWidget {
-  const PopularPicksSection({super.key});
+  final List<PopularPickModel>? picks;
+
+  const PopularPicksSection({
+    super.key,
+    this.picks,
+  });
 
   @override
   State<PopularPicksSection> createState() => _PopularPicksSectionState();
@@ -20,7 +25,16 @@ class _PopularPicksSectionState extends State<PopularPicksSection> {
   @override
   void initState() {
     super.initState();
-    _future = _loadPicks();
+    _future = widget.picks != null ? Future.value(widget.picks) : _loadPicks();
+  }
+
+
+  @override
+  void didUpdateWidget(covariant PopularPicksSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.picks != widget.picks && widget.picks != null) {
+      _future = Future.value(widget.picks);
+    }
   }
 
   Future<List<PopularPickModel>> _loadPicks() {

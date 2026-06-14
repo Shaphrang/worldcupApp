@@ -3,81 +3,18 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/team_flag.dart';
 import '../../../models/prediction_model.dart';
-import '../../../services/prediction_service.dart';
+import '../models/home_data.dart';
 import 'home_section_card.dart';
 
-class LeadersSection extends StatefulWidget {
+class LeadersSection extends StatelessWidget {
   final VoidCallback onViewAll;
+  final HomeLatestWinnersData? data;
 
   const LeadersSection({
     super.key,
     required this.onViewAll,
+    required this.data,
   });
-
-  @override
-  State<LeadersSection> createState() => _LeadersSectionState();
-}
-
-class _LeadersSectionState extends State<LeadersSection> {
-  final _service = PredictionService();
-
-  late Future<_LatestWinnersData?> _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _loadLatestWinners();
-  }
-
-  Future<_LatestWinnersData?> _loadLatestWinners() async {
-    try {
-      final completedMatches = await _service.completedPredictionMatches();
-
-      if (completedMatches.isEmpty) {
-        return null;
-      }
-
-      final matchesToCheck = completedMatches.take(10).toList();
-
-      for (final match in matchesToCheck) {
-        final predictions = await _service.publicPredictionsForMatch(
-          match: match,
-          limit: 10,
-          offset: 0,
-        );
-
-        if (predictions.isEmpty) {
-          continue;
-        }
-
-        final winners = [...predictions];
-
-        winners.sort((a, b) {
-          final pointsCompare = b.points.compareTo(a.points);
-          if (pointsCompare != 0) return pointsCompare;
-
-          final aTime = a.submittedAt;
-          final bTime = b.submittedAt;
-
-          if (aTime == null && bTime == null) return 0;
-          if (aTime == null) return 1;
-          if (bTime == null) return -1;
-
-          return aTime.compareTo(bTime);
-        });
-
-        return _LatestWinnersData(
-          match: match,
-          winners: winners.take(5).toList(),
-        );
-      }
-
-      return null;
-    } catch (error) {
-      debugPrint('Could not load latest winners on home: $error');
-      return null;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,61 +24,62 @@ class _LeadersSectionState extends State<LeadersSection> {
       icon: Icons.stadium_rounded,
       accent: const Color(0xFF22C55E),
       action: 'View all',
-      onActionTap: widget.onViewAll,
+      onActionTap: onViewAll,
       gradientColors: const [
         Color(0xFF062F2A),
         Color(0xFF0B2234),
         Color(0xFF07111E),
       ],
-      child: FutureBuilder<_LatestWinnersData?>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const _LeadersLoading();
-          }
+      child: _LeadersContent(data: data),
+    );
+  }
+}
 
-          final data = snapshot.data;
+class _LeadersContent extends StatelessWidget {
+  final HomeLatestWinnersData? data;
 
-          if (data == null || data.winners.isEmpty) {
-            return const _NoLatestWinners();
-          }
+  const _LeadersContent({required this.data});
 
-          final topWinner = data.winners.first;
-          final otherWinners = data.winners.skip(1).toList();
+  @override
+  Widget build(BuildContext context) {
+    final latest = data;
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ResultScoreboard(match: data.match),
-              const SizedBox(height: 12),
-              _TopWinnerScoreboardCard(
-                winner: topWinner,
-                match: data.match,
+    if (latest == null || latest.winners.isEmpty) {
+      return const _NoLatestWinners();
+    }
+
+    final topWinner = latest.winners.first;
+    final otherWinners = latest.winners.skip(1).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ResultScoreboard(match: latest.match),
+        const SizedBox(height: 12),
+        _TopWinnerScoreboardCard(
+          winner: topWinner,
+          match: latest.match,
+        ),
+        if (otherWinners.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const _BoardListHeader(),
+          const SizedBox(height: 7),
+          ...List.generate(otherWinners.length, (index) {
+            final winner = otherWinners[index];
+            final rank = index + 2;
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: index == otherWinners.length - 1 ? 0 : 7,
               ),
-              if (otherWinners.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _BoardListHeader(),
-                const SizedBox(height: 7),
-                ...List.generate(otherWinners.length, (index) {
-                  final winner = otherWinners[index];
-                  final rank = index + 2;
-
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      bottom: index == otherWinners.length - 1 ? 0 : 7,
-                    ),
-                    child: _WinnerBoardRow(
-                      rank: rank,
-                      winner: winner,
-                      match: data.match,
-                    ),
-                  );
-                }),
-              ],
-            ],
-          );
-        },
-      ),
+              child: _WinnerBoardRow(
+                rank: rank,
+                winner: winner,
+                match: latest.match,
+              ),
+            );
+          }),
+        ],
+      ],
     );
   }
 }
@@ -437,6 +375,8 @@ class _TopWinnerScoreboardCard extends StatelessWidget {
 }
 
 class _BoardListHeader extends StatelessWidget {
+  const _BoardListHeader();
+
   @override
   Widget build(BuildContext context) {
     return const Padding(
@@ -921,34 +861,6 @@ class _ScoreBar extends StatelessWidget {
   }
 }
 
-class _LeadersLoading extends StatelessWidget {
-  const _LeadersLoading();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 214,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.045),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.06),
-        ),
-      ),
-      alignment: Alignment.center,
-      child: const SizedBox(
-        height: 24,
-        width: 24,
-        child: CircularProgressIndicator(
-          strokeWidth: 2.6,
-          color: Color(0xFF22C55E),
-        ),
-      ),
-    );
-  }
-}
-
 class _NoLatestWinners extends StatelessWidget {
   const _NoLatestWinners();
 
@@ -987,14 +899,4 @@ class _NoLatestWinners extends StatelessWidget {
       ),
     );
   }
-}
-
-class _LatestWinnersData {
-  final PredictionMatchFilter match;
-  final List<PredictionModel> winners;
-
-  const _LatestWinnersData({
-    required this.match,
-    required this.winners,
-  });
 }

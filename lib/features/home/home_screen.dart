@@ -3,12 +3,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/sponsor_banner_section.dart';
-import '../../models/fixture_model.dart';
 import '../../models/sponsor_banner_model.dart';
 import '../../services/auth_service.dart';
-import '../../services/fixture_service.dart';
-import '../../services/prediction_service.dart';
-import '../../services/profile_service.dart';
+import '../../services/home_service.dart';
 import 'models/home_data.dart';
 import 'widgets/header_banner_section.dart';
 import 'widgets/home_background.dart';
@@ -28,87 +25,24 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final auth = AuthService();
+  final _homeService = HomeService.instance;
 
-  late Future<_HomeScreenData> _future;
+  late Future<HomeData> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _loadHome();
-  }
-
-  Future<_HomeScreenData> _loadHome() async {
-    dynamic profile;
-    Object? fixtureError;
-
-    List<FixtureModel> todayMatches = [];
-    List<FixtureModel> upcomingMatches = [];
-    List<FixtureModel> latestResults = [];
-    List<HomePredictionPreviewItem> myUpcomingPredictions = [];
-
-    if (auth.isLoggedIn) {
-      try {
-        profile = await ProfileService().currentProfile();
-      } catch (_) {
-        profile = null;
-      }
-    }
-
-    try {
-      todayMatches = await FixtureService().todayFixtures();
-      upcomingMatches = await FixtureService().fixtures();
-      latestResults = await FixtureService().latestResults(limit: 2);
-    } catch (error) {
-      fixtureError = error;
-    }
-
-    if (auth.isLoggedIn && upcomingMatches.isNotEmpty) {
-      try {
-        myUpcomingPredictions =
-            await PredictionService().homeUpcomingPredictionsFromFixtures(
-          upcomingMatches,
-          limit: 5,
-        );
-      } catch (error) {
-        debugPrint('Could not load home predictions: $error');
-        myUpcomingPredictions = [];
-      }
-    }
-
-    final shownMatches = todayMatches.isNotEmpty
-        ? todayMatches
-        : upcomingMatches.take(6).toList();
-
-    final homeData = HomeData(
-      profile: profile,
-      matches: shownMatches,
-      upcomingMatches: upcomingMatches,
-      latestResults: latestResults,
-      fixtureError: fixtureError,
-      isShowingTodayMatches: todayMatches.isNotEmpty,
-    );
-
-    return _HomeScreenData(
-      homeData: homeData,
-      myUpcomingPredictions: myUpcomingPredictions,
-    );
+    _future = _homeService.prepareHome();
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _future = _loadHome();
-    });
-
-    await _future;
+    final refreshed = _homeService.prepareHome(forceRefresh: true);
+    setState(() => _future = refreshed);
+    await refreshed;
   }
 
-  void _openFixtures() {
-    context.go('/fixtures');
-  }
-
-  void _openWinners() {
-    context.go('/winners');
-  }
+  void _openFixtures() => context.go('/fixtures');
+  void _openWinners() => context.go('/winners');
 
   void _openProfile() {
     if (auth.isLoggedIn) {
@@ -118,9 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openLogin() {
-    context.push('/login?redirect=/');
-  }
+  void _openLogin() => context.push('/login?redirect=/');
 
   @override
   Widget build(BuildContext context) {
@@ -132,31 +64,24 @@ class _HomeScreenState extends State<HomeScreen> {
             color: AppTheme.teal,
             backgroundColor: AppTheme.surface2,
             onRefresh: _refresh,
-            child: FutureBuilder<_HomeScreenData>(
+            child: FutureBuilder<HomeData>(
               future: _future,
+              initialData: _homeService.takePreparedData(),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.teal,
-                    ),
-                  );
-                }
+                final data = snapshot.data ?? HomeData.empty(
+                  fixtureError: snapshot.error,
+                );
 
-                final screenData = snapshot.data;
-                final data = screenData?.homeData;
-
-                final homeMatches = data?.matches ?? <FixtureModel>[];
-
+                final homeMatches = data.matches;
                 final userName = auth.isLoggedIn
-                    ? data?.profile?.fullName ??
+                    ? data.profile?.fullName ??
                         auth.currentUser?.email?.split('@').first ??
                         'Player'
                     : null;
 
                 return ListView(
                   physics: const AlwaysScrollableScrollPhysics(
-                    parent: BouncingScrollPhysics(),
+                    parent: ClampingScrollPhysics(),
                   ),
                   padding: const EdgeInsets.fromLTRB(14, 10, 14, 100),
                   children: [
@@ -164,73 +89,55 @@ class _HomeScreenState extends State<HomeScreen> {
                       name: userName,
                       onProfileTap: _openProfile,
                     ),
-
                     const SizedBox(height: 14),
-
-                    const SponsorBannerSection(
+                    SponsorBannerSection.fromBanners(
+                      banners: data.topBanners,
                       placement: SponsorBannerPlacement.home,
                       slot: SponsorBannerSlot.top,
                       height: 118,
-                      limit: 5,
                       autoPlay: true,
                     ),
-
                     const SizedBox(height: 16),
-
                     TodaysMatchesSection(
-                      title: data?.isShowingTodayMatches == true
+                      title: data.isShowingTodayMatches
                           ? 'Today’s Matches'
                           : 'Upcoming Matches',
                       matches: homeMatches,
-                      error: data?.fixtureError,
+                      error: data.fixtureError,
                       onRetry: _refresh,
                       onViewAll: _openFixtures,
-                      onMatchTap: (match) {
-                        context.push('/fixtures/${match.id}');
-                      },
+                      onMatchTap: (match) => context.push('/fixtures/${match.id}'),
                     ),
-
                     const SizedBox(height: 16),
-
                     LatestWinnersSection(
-                      results: data?.latestResults ?? [],
+                      results: data.latestResults,
                       onViewAll: _openFixtures,
                     ),
-
                     const SizedBox(height: 16),
-
-                    const SponsorBannerSection(
+                    SponsorBannerSection.fromBanners(
+                      banners: data.midBanners,
                       placement: SponsorBannerPlacement.fixtures,
                       slot: SponsorBannerSlot.top,
                       height: 96,
-                      limit: 5,
                       autoPlay: true,
                     ),
-
                     const SizedBox(height: 16),
-
                     HomeMyPredictionsSection(
                       isLoggedIn: auth.isLoggedIn,
-                      predictions: screenData?.myUpcomingPredictions ?? [],
+                      predictions: data.myUpcomingPredictions,
                       onLoginTap: _openLogin,
-                      onPredictionTap: (prediction) {
-                        context.push('/fixtures/${prediction.matchId}');
-                      },
+                      onPredictionTap: (prediction) =>
+                          context.push('/fixtures/${prediction.matchId}'),
                     ),
-
                     const SizedBox(height: 16),
-
-                    const PopularPicksSection(),
-
+                    PopularPicksSection(picks: data.popularPicks),
                     const SizedBox(height: 16),
-
                     LeadersSection(
+                      data: data.latestWinners,
                       onViewAll: _openWinners,
                     ),
-
                     const SizedBox(height: 16),
-
-                    const JoinWhatsAppGroupSection(),
+                    JoinWhatsAppGroupSection(link: data.whatsAppLink),
                   ],
                 );
               },
@@ -240,14 +147,4 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-}
-
-class _HomeScreenData {
-  final HomeData homeData;
-  final List<HomePredictionPreviewItem> myUpcomingPredictions;
-
-  const _HomeScreenData({
-    required this.homeData,
-    required this.myUpcomingPredictions,
-  });
 }
