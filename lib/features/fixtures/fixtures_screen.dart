@@ -4,9 +4,14 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_time_utils.dart';
 import '../../core/widgets/loading_view.dart';
+import '../../core/widgets/match_prize_pool_card.dart';
+import '../../core/widgets/sponsor_banner_section.dart';
 import '../../core/widgets/team_flag.dart';
 import '../../models/fixture_model.dart';
+import '../../models/match_prize_pool_model.dart';
+import '../../models/sponsor_banner_model.dart';
 import '../../services/fixture_service.dart';
+import '../../services/prediction_service.dart';
 
 class FixturesScreen extends StatefulWidget {
   const FixturesScreen({super.key});
@@ -59,6 +64,8 @@ class _FixturesScreenState extends State<FixturesScreen> {
   List<Object> buildListItems(List<FixtureModel> fixtures) {
     final items = <Object>[];
     DateTime? lastDate;
+    int matchCount = 0;
+    bool middleBannerInserted = false;
 
     for (final fixture in fixtures) {
       final currentDate = fixture.matchStartAt.toLocal();
@@ -69,6 +76,18 @@ class _FixturesScreenState extends State<FixturesScreen> {
       }
 
       items.add(_FixtureItem(fixture));
+      matchCount++;
+
+      if (!middleBannerInserted && matchCount == 10) {
+        items.add(
+          const _BannerItem(
+            placement: SponsorBannerPlacement.fixtures,
+            slot: SponsorBannerSlot.middle,
+            height: 96,
+          ),
+        );
+        middleBannerInserted = true;
+      }
     }
 
     return items;
@@ -81,6 +100,20 @@ class _FixturesScreenState extends State<FixturesScreen> {
     final y = b.toLocal();
 
     return x.year == y.year && x.month == y.month && x.day == y.day;
+  }
+
+  List<Widget> _headerAndTopBanner() {
+    return const [
+      _PageHeader(),
+      SizedBox(height: 16),
+      SponsorBannerSection(
+        placement: SponsorBannerPlacement.fixtures,
+        slot: SponsorBannerSlot.top,
+        height: 104,
+        limit: 5,
+        autoPlay: true,
+      ),
+    ];
   }
 
   @override
@@ -105,7 +138,7 @@ class _FixturesScreenState extends State<FixturesScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 18, 16, 110),
                     children: [
-                      const _PageHeader(),
+                      ..._headerAndTopBanner(),
                       const SizedBox(height: 18),
                       _StateCard(
                         icon: Icons.error_outline_rounded,
@@ -125,7 +158,7 @@ class _FixturesScreenState extends State<FixturesScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 18, 16, 110),
                     children: [
-                      const _PageHeader(),
+                      ..._headerAndTopBanner(),
                       const SizedBox(height: 18),
                       _StateCard(
                         icon: Icons.event_busy_rounded,
@@ -141,22 +174,48 @@ class _FixturesScreenState extends State<FixturesScreen> {
                 final items = buildListItems(fixtures);
 
                 return ListView.builder(
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
                   ),
                   padding: const EdgeInsets.fromLTRB(14, 18, 14, 110),
-                  itemCount: items.length + 1,
+                  itemCount: items.length + 2,
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return const _PageHeader();
                     }
 
-                    final item = items[index - 1];
+                    if (index == 1) {
+                      return const Padding(
+                        padding: EdgeInsets.only(top: 16, bottom: 2),
+                        child: SponsorBannerSection(
+                          placement: SponsorBannerPlacement.fixtures,
+                          slot: SponsorBannerSlot.top,
+                          height: 104,
+                          limit: 5,
+                          autoPlay: true,
+                        ),
+                      );
+                    }
+
+                    final item = items[index - 2];
 
                     if (item is _DateHeaderItem) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 18, bottom: 9),
                         child: _DateHeader(label: item.label),
+                      );
+                    }
+
+                    if (item is _BannerItem) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6, bottom: 16),
+                        child: SponsorBannerSection(
+                          placement: item.placement,
+                          slot: item.slot,
+                          height: item.height,
+                          limit: 5,
+                          autoPlay: true,
+                        ),
                       );
                     }
 
@@ -449,7 +508,6 @@ class _FixtureTile extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -479,8 +537,12 @@ class _FixtureTile extends StatelessWidget {
                   ],
                 ),
 
-                const SizedBox(height: 12),
+                if (canPredict) ...[
+                  const SizedBox(height: 12),
+                  _FixturePrizePool(matchId: fixture.id),
+                ],
 
+                const SizedBox(height: 12),
                 if (isCompleted)
                   _ResultFooter(hasScore: hasScore)
                 else
@@ -493,6 +555,68 @@ class _FixtureTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _FixturePrizePool extends StatefulWidget {
+  final String matchId;
+
+  const _FixturePrizePool({
+    required this.matchId,
+  });
+
+  @override
+  State<_FixturePrizePool> createState() => _FixturePrizePoolState();
+}
+
+class _FixturePrizePoolState extends State<_FixturePrizePool> {
+  final _service = PredictionService();
+
+  late Future<MatchPrizePoolModel?> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _service.matchPrizePool(widget.matchId);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FixturePrizePool oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.matchId != widget.matchId) {
+      _future = _service.matchPrizePool(widget.matchId);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<MatchPrizePoolModel?>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const MatchPrizePoolCard(
+            prizePool: null,
+            loading: true,
+          );
+        }
+
+        if (snapshot.hasError) {
+          return const SizedBox.shrink();
+        }
+
+        final prizePool = snapshot.data;
+
+        if (prizePool == null) {
+          return const SizedBox.shrink();
+        }
+
+        return MatchPrizePoolCard(
+          prizePool: prizePool,
+          loading: false,
+        );
+      },
     );
   }
 }
@@ -689,37 +813,35 @@ class _PredictFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Center(
-          child: SizedBox(
-            height: 32,
-            width: 118,
-            child: FilledButton(
-              onPressed: canPredict ? onTap : null,
-              style: FilledButton.styleFrom(
-                disabledBackgroundColor: Colors.white.withOpacity(0.07),
-                disabledForegroundColor: Colors.white38,
-                backgroundColor: AppTheme.tealDark,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                padding: EdgeInsets.zero,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(13),
-                ),
+    return SizedBox(
+      height: 38,
+      child: Center(
+        child: SizedBox(
+          height: 32,
+          width: 118,
+          child: FilledButton(
+            onPressed: canPredict ? onTap : null,
+            style: FilledButton.styleFrom(
+              disabledBackgroundColor: Colors.white.withOpacity(0.07),
+              disabledForegroundColor: Colors.white38,
+              backgroundColor: AppTheme.tealDark,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(13),
               ),
-              child: const Text(
-                'Predict Now',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w900,
-                ),
+            ),
+            child: const Text(
+              'Predict Now',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ),
         ),
-        const SizedBox(height: 6),
-      ],
+      ),
     );
   }
 }
@@ -734,7 +856,7 @@ class _ResultFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 26,
+      height: 32,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: AppTheme.gold.withOpacity(0.11),
@@ -755,6 +877,7 @@ class _ResultFooter extends StatelessWidget {
     );
   }
 }
+
 class _StateCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -823,4 +946,16 @@ class _FixtureItem {
   final FixtureModel fixture;
 
   const _FixtureItem(this.fixture);
+}
+
+class _BannerItem {
+  final String placement;
+  final String slot;
+  final double height;
+
+  const _BannerItem({
+    required this.placement,
+    required this.slot,
+    required this.height,
+  });
 }

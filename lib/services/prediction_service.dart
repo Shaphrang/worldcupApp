@@ -5,6 +5,7 @@ import '../features/home/widgets/home_my_predictions_section.dart';
 import '../models/fixture_model.dart';
 import '../models/participant_model.dart';
 import '../models/prediction_model.dart';
+import '../models/match_prize_pool_model.dart';
 
 class UserMatchPrediction {
   final String matchId;
@@ -357,6 +358,168 @@ Future<List<ParticipantModel>> participants(String matchId) async {
     return items.take(limit).toList();
   }
 
+  Future<List<PredictionMatchFilter>> completedPredictionMatches() async {
+    final data = await _db
+        .from('fixtures_view')
+        .select(
+          'id, match_title, stage, match_start_at, status, team_a_score, team_b_score, team_a_name, team_b_name, team_a_short_name, team_b_short_name, team_a_flag_url, team_b_flag_url',
+        )
+        .inFilter(
+          'status',
+          [
+            'completed',
+            'COMPLETED',
+            'finalized',
+            'FINALIZED',
+            'finished',
+            'FINISHED',
+          ],
+        )
+        .order('match_start_at', ascending: false);
+
+    return (data as List)
+        .map(
+          (item) => PredictionMatchFilter.fromMap(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .where((match) => match.id.isNotEmpty)
+        .toList();
+  }
+
+  Future<List<PredictionModel>> publicPredictionsForMatch({
+      required PredictionMatchFilter match,
+      int limit = 100,
+      int offset = 0,
+    }) async {
+      final data = await _db.rpc(
+        'get_public_match_predictions',
+        params: {
+          'p_match_id': match.id,
+          'p_limit': limit,
+          'p_offset': offset,
+        },
+      );
+
+      return (data as List).map((item) {
+        final row = Map<String, dynamic>.from(item as Map);
+
+        return PredictionModel.fromMap({
+          ...row,
+          'match_title': match.matchTitle,
+          'stage': match.stage,
+          'team_a_name': match.teamAName,
+          'team_b_name': match.teamBName,
+          'team_a_short_name': match.teamAShortName,
+          'team_b_short_name': match.teamBShortName,
+          'team_a_flag_url': match.teamAFlagUrl,
+          'team_b_flag_url': match.teamBFlagUrl,
+        });
+      }).toList();
+    }
+  Future<List<PredictionModel>> allPredictionsForMatch(String matchId) async {
+    if (matchId.trim().isEmpty) {
+      return [];
+    }
+
+    final data = await _db
+        .from('predictions_view')
+        .select()
+        .eq('match_id', matchId)
+        .order('submitted_at', ascending: true);
+
+    final rows = (data as List)
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+
+    final userIds = rows
+        .map((row) => _text(row['user_id']))
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final profilesById = <String, Map<String, dynamic>>{};
+
+    if (userIds.isNotEmpty) {
+      try {
+        final profileRows = await _db
+            .from('profiles')
+            .select('id, full_name, phone, email, avatar_url')
+            .inFilter('id', userIds);
+
+        for (final item in profileRows as List) {
+          final row = Map<String, dynamic>.from(item as Map);
+          final id = _text(row['id']);
+
+          if (id.isNotEmpty) {
+            profilesById[id] = row;
+          }
+        }
+      } catch (error, stackTrace) {
+        developer.log(
+          'Could not load prediction user profiles',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
+    final predictions = rows.map((row) {
+      final userId = _text(row['user_id']);
+      final profile = profilesById[userId];
+
+      return PredictionModel.fromMap({
+        ...row,
+        if (profile != null) ...profile,
+      });
+    }).toList();
+
+    predictions.sort((a, b) {
+      final pointCompare = (b.points ?? 0).compareTo(a.points ?? 0);
+
+      if (pointCompare != 0) return pointCompare;
+
+      final aDate = a.submittedAt;
+      final bDate = b.submittedAt;
+
+      if (aDate == null && bDate == null) return 0;
+      if (aDate == null) return 1;
+      if (bDate == null) return -1;
+
+      return aDate.compareTo(bDate);
+    });
+
+    return predictions;
+  }
+
+Future<MatchPrizePoolModel?> matchPrizePool(String matchId) async {
+  if (matchId.trim().isEmpty) {
+    return null;
+  }
+
+  final response = await _db.rpc(
+    'get_match_prize_pool',
+    params: {
+      'p_match_id': matchId,
+    },
+  );
+
+  if (response == null) return null;
+
+  if (response is List) {
+    if (response.isEmpty) return null;
+
+    final first = response.first;
+
+    return MatchPrizePoolModel.fromMap(
+      Map<String, dynamic>.from(first as Map),
+    );
+  }
+
+  return MatchPrizePoolModel.fromMap(
+    Map<String, dynamic>.from(response as Map),
+  );
+}
   String _text(dynamic value) {
     if (value == null) {
       return '';

@@ -25,7 +25,6 @@ class AppTheme {
         primary: teal,
         secondary: gold,
         surface: surface,
-        background: background,
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,
@@ -126,8 +125,8 @@ class AppTheme {
         height: 58,
         backgroundColor: Colors.transparent,
         indicatorColor: teal.withOpacity(0.16),
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          final selected = states.contains(MaterialState.selected);
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
 
           return TextStyle(
             color: selected ? teal : Colors.white54,
@@ -135,8 +134,8 @@ class AppTheme {
             fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
           );
         }),
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          final selected = states.contains(MaterialState.selected);
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
 
           return IconThemeData(
             color: selected ? teal : Colors.white54,

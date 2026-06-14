@@ -1,12 +1,15 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_time_utils.dart';
 import '../../core/widgets/loading_view.dart';
+import '../../core/widgets/match_prize_pool_card.dart';
+import '../../core/widgets/sponsor_banner_section.dart';
 import '../../core/widgets/team_flag.dart';
-import '../../services/winner_service.dart';
+import '../../models/match_prize_pool_model.dart';
+import '../../models/prediction_model.dart';
+import '../../models/sponsor_banner_model.dart';
+import '../../services/prediction_service.dart';
 
 class WinnersScreen extends StatefulWidget {
   const WinnersScreen({super.key});
@@ -16,264 +19,288 @@ class WinnersScreen extends StatefulWidget {
 }
 
 class _WinnersScreenState extends State<WinnersScreen> {
-  late Future<LatestMatchWinnersResult> _future;
+  final _service = PredictionService();
+
+  bool _loading = true;
+  bool _loadingWinners = false;
+  bool _loadingPrizePool = false;
+
+  String? _error;
+  String? _selectedMatchId;
+
+  List<PredictionMatchFilter> _matches = [];
+  List<PredictionModel> _winners = [];
+  MatchPrizePoolModel? _prizePool;
+
+  PredictionMatchFilter? get _selectedMatch {
+    final id = _selectedMatchId;
+
+    if (id == null) return null;
+
+    for (final match in _matches) {
+      if (match.id == id) return match;
+    }
+
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
-    _future = WinnerService().latestMatchWinners();
+    _loadInitial();
+  }
+
+  Future<void> _loadInitial() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _winners = [];
+      _prizePool = null;
+    });
+
+    try {
+      final matches = await _service.completedPredictionMatches();
+
+      if (!mounted) return;
+
+      final firstMatchId = matches.isEmpty ? null : matches.first.id;
+
+      setState(() {
+        _matches = matches;
+        _selectedMatchId = firstMatchId;
+        _loading = false;
+      });
+
+      if (firstMatchId != null) {
+        await _loadSelectedMatchData(firstMatchId);
+      }
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _error = '$error';
+      });
+    }
+  }
+
+  Future<void> _loadSelectedMatchData(String matchId) async {
+    setState(() {
+      _loadingWinners = true;
+      _loadingPrizePool = true;
+      _error = null;
+      _selectedMatchId = matchId;
+      _winners = [];
+      _prizePool = null;
+    });
+
+    try {
+      PredictionMatchFilter? match;
+
+      for (final item in _matches) {
+        if (item.id == matchId) {
+          match = item;
+          break;
+        }
+      }
+
+      if (match == null) {
+        if (!mounted) return;
+
+        setState(() {
+          _winners = [];
+          _prizePool = null;
+          _loadingWinners = false;
+          _loadingPrizePool = false;
+        });
+
+        return;
+      }
+
+      final predictions = await _service.publicPredictionsForMatch(
+        match: match,
+        limit: 100,
+        offset: 0,
+      );
+
+      final validWinners = predictions.where((item) {
+        return item.isEvaluated &&
+            item.exactScorePoints > 0 &&
+            item.points > 0;
+      }).toList();
+
+      validWinners.sort((a, b) {
+        final pointCompare = b.points.compareTo(a.points);
+
+        if (pointCompare != 0) return pointCompare;
+
+        final aDate = a.submittedAt;
+        final bDate = b.submittedAt;
+
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+
+        return aDate.compareTo(bDate);
+      });
+
+      MatchPrizePoolModel? prizePool;
+
+      try {
+        prizePool = await _service.matchPrizePool(matchId);
+      } catch (_) {
+        prizePool = null;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _winners = validWinners.take(10).toList();
+        _prizePool = prizePool;
+        _loadingWinners = false;
+        _loadingPrizePool = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingWinners = false;
+        _loadingPrizePool = false;
+        _error = '$error';
+      });
+    }
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _future = WinnerService().latestMatchWinners();
-    });
+    final selected = _selectedMatchId;
 
-    await _future;
+    if (selected == null) {
+      await _loadInitial();
+      return;
+    }
+
+    await _loadSelectedMatchData(selected);
   }
 
   @override
   Widget build(BuildContext context) {
+    final selectedMatch = _selectedMatch;
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: _WinnersBackground(
         child: SafeArea(
           bottom: false,
-          child: RefreshIndicator(
-            color: AppTheme.gold,
-            backgroundColor: const Color(0xFF091827),
-            onRefresh: _refresh,
-            child: FutureBuilder<LatestMatchWinnersResult>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const LoadingView();
-                }
-
-                if (snapshot.hasError) {
-                  return ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 24),
+          child: _loading
+              ? const LoadingView()
+              : RefreshIndicator(
+                  color: AppTheme.gold,
+                  backgroundColor: const Color(0xFF091827),
+                  onRefresh: _refresh,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 110),
                     children: [
                       const _PageHeader(),
-                      const SizedBox(height: 16),
-                      _StateCard(
-                        icon: Icons.error_outline_rounded,
-                        title: 'Could not load winners',
-                        message: '${snapshot.error}',
-                        buttonLabel: 'Retry',
-                        onPressed: _refresh,
+
+                      const SizedBox(height: 14),
+
+                      const SponsorBannerSection(
+                        placement: SponsorBannerPlacement.winners,
+                        slot: SponsorBannerSlot.top,
+                        height: 104,
+                        limit: 5,
+                        autoPlay: true,
                       ),
-                    ],
-                  );
-                }
 
-                final result = snapshot.data;
+                      const SizedBox(height: 14),
 
-                if (result == null || result.match == null) {
-                  return ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 24),
-                    children: const [
-                      _PageHeader(),
-                      SizedBox(height: 16),
-                      _NoCompletedMatchCard(),
-                    ],
-                  );
-                }
-
-                final match = result.match!;
-
-                return ListView(
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(14, 16, 14, 24),
-                  children: [
-                    const _PageHeader(),
-                    const SizedBox(height: 16),
-                    _LatestMatchCard(match: match),
-                    const SizedBox(height: 14),
-                    if (result.participants.isEmpty)
-                      const _NoPredictionsCard()
-                    else ...[
-                      if (result.isEvaluated) ...[
-                        _WinnerSummaryCard(result: result),
-                        const SizedBox(height: 16),
-                      ] else ...[
-                        _NotEvaluatedCard(match: match),
-                        const SizedBox(height: 16),
-                      ],
-                      const _SectionTitle(
-                        title: 'Compared Predictions',
-                        subtitle: 'Sorted by points, then participant name',
-                      ),
-                      const SizedBox(height: 10),
-                      for (int i = 0; i < result.participants.length; i++) ...[
-                        _PredictionRankTile(
-                          item: result.participants[i],
-                          match: match,
+                      if (_matches.isNotEmpty) ...[
+                        MatchPrizePoolCard(
+                          prizePool: _prizePool,
+                          loading: _loadingPrizePool,
                         ),
-                        if (i != result.participants.length - 1)
-                          const SizedBox(height: 10),
+                        const SizedBox(height: 14),
+                      ],
+
+                      if (_error != null) ...[
+                        _StateCard(
+                          icon: Icons.error_outline_rounded,
+                          title: 'Could not load winners',
+                          message: _error!,
+                          buttonLabel: 'Retry',
+                          onPressed: _refresh,
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+
+                      if (_matches.isEmpty)
+                        const _NoCompletedMatchCard()
+                      else ...[
+                        _MatchFilterCard(
+                          matches: _matches,
+                          selectedMatchId: _selectedMatchId,
+                          selectedMatch: selectedMatch,
+                          totalShown: _winners.length,
+                          loading: _loadingWinners || _loadingPrizePool,
+                          onChanged: (matchId) {
+                            if (matchId == null ||
+                                matchId == _selectedMatchId) {
+                              return;
+                            }
+
+                            _loadSelectedMatchData(matchId);
+                          },
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        const SponsorBannerSection(
+                          placement: SponsorBannerPlacement.winners,
+                          slot: SponsorBannerSlot.middle,
+                          height: 96,
+                          limit: 5,
+                          autoPlay: true,
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        _TopTenHeader(
+                          totalShown: _winners.length,
+                          loading: _loadingWinners,
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        if (_loadingWinners)
+                          const _NativeLoadingCard()
+                        else if (_winners.isEmpty)
+                          const _NoPredictionsCard()
+                        else
+                          ...List.generate(_winners.length, (index) {
+                            final winner = _winners[index];
+
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                bottom: index == _winners.length - 1 ? 0 : 10,
+                              ),
+                              child: _WinnerRankTile(
+                                rank: index + 1,
+                                item: winner,
+                                match: selectedMatch,
+                              ),
+                            );
+                          }),
                       ],
                     ],
-                  ],
-                );
-              },
-            ),
-          ),
+                  ),
+                ),
         ),
       ),
     );
   }
-}
-
-class _WinnersBackground extends StatelessWidget {
-  final Widget child;
-
-  const _WinnersBackground({
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF071C2D),
-            Color(0xFF06251F),
-            Color(0xFF06111E),
-            Color(0xFF02070D),
-          ],
-          stops: [0.0, 0.35, 0.70, 1.0],
-        ),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -130,
-            right: -120,
-            child: _GlowBlob(
-              color: AppTheme.gold,
-              size: 320,
-              opacity: 0.16,
-            ),
-          ),
-          Positioned(
-            top: 210,
-            left: -160,
-            child: _GlowBlob(
-              color: AppTheme.teal,
-              size: 300,
-              opacity: 0.11,
-            ),
-          ),
-          Positioned(
-            bottom: 90,
-            right: -180,
-            child: _GlowBlob(
-              color: AppTheme.blue,
-              size: 320,
-              opacity: 0.08,
-            ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(
-                painter: _WinnersPatternPainter(),
-              ),
-            ),
-          ),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _GlowBlob extends StatelessWidget {
-  final Color color;
-  final double size;
-  final double opacity;
-
-  const _GlowBlob({
-    required this.color,
-    required this.size,
-    required this.opacity,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: size,
-      width: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withOpacity(opacity),
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(opacity),
-            blurRadius: 110,
-            spreadRadius: 46,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _WinnersPatternPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..color = Colors.white.withOpacity(0.025)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    final accentPaint = Paint()
-      ..color = AppTheme.gold.withOpacity(0.035)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.1;
-
-    canvas.drawCircle(
-      Offset(size.width * 0.78, size.height * 0.24),
-      72,
-      accentPaint,
-    );
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          22,
-          size.height * 0.12,
-          size.width - 44,
-          118,
-        ),
-        const Radius.circular(30),
-      ),
-      linePaint,
-    );
-
-    final dotPaint = Paint()
-      ..color = Colors.white.withOpacity(0.024)
-      ..style = PaintingStyle.fill;
-
-    const spacing = 34.0;
-
-    for (double y = 18; y < size.height; y += spacing) {
-      for (double x = 18; x < size.width; x += spacing) {
-        if (((x + y) ~/ spacing) % 3 == 0) continue;
-        canvas.drawCircle(Offset(x, y), 1.05, dotPaint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _PageHeader extends StatelessWidget {
@@ -327,7 +354,7 @@ class _PageHeader extends StatelessWidget {
               ),
               SizedBox(height: 5),
               Text(
-                'Latest match prediction result',
+                'Top 10 exact-score winners by match',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -344,152 +371,440 @@ class _PageHeader extends StatelessWidget {
   }
 }
 
-class _LatestMatchCard extends StatelessWidget {
-  final WinnerMatchInfo match;
+class _MatchFilterCard extends StatelessWidget {
+  final List<PredictionMatchFilter> matches;
+  final String? selectedMatchId;
+  final PredictionMatchFilter? selectedMatch;
+  final int totalShown;
+  final bool loading;
+  final ValueChanged<String?> onChanged;
 
-  const _LatestMatchCard({
+  const _MatchFilterCard({
+    required this.matches,
+    required this.selectedMatchId,
+    required this.selectedMatch,
+    required this.totalShown,
+    required this.loading,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final match = selectedMatch;
+
+    final dateText = match?.matchStartAt == null
+        ? 'Completed match'
+        : DateTimeUtils.dateOnly(match!.matchStartAt);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF091827).withOpacity(0.92),
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: Colors.white.withOpacity(0.09)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.gold.withOpacity(0.10),
+            const Color(0xFF091827).withOpacity(0.96),
+            const Color(0xFF050E18).withOpacity(0.98),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const _SmallPill(
+                icon: Icons.sports_soccer_rounded,
+                label: 'SELECT MATCH',
+                color: AppTheme.gold,
+              ),
+              const Spacer(),
+              if (loading)
+                const SizedBox(
+                  height: 15,
+                  width: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.gold,
+                  ),
+                )
+              else
+                Text(
+                  dateText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.055),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.09)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: selectedMatchId,
+                isExpanded: true,
+                dropdownColor: const Color(0xFF091827),
+                iconEnabledColor: AppTheme.gold,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+                items: matches.map((match) {
+                  return DropdownMenuItem<String>(
+                    value: match.id,
+                    child: Text(
+                      match.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }).toList(),
+                onChanged: loading ? null : onChanged,
+              ),
+            ),
+          ),
+
+          if (match != null) ...[
+            const SizedBox(height: 14),
+
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: _MatchTeam(
+                    name: match.teamAName,
+                    shortName: match.teamAShortName ?? '',
+                    flagUrl: match.teamAFlagUrl,
+                    alignRight: false,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _ResultScoreBox(scoreText: match.scoreText),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MatchTeam(
+                    name: match.teamBName,
+                    shortName: match.teamBShortName ?? '',
+                    flagUrl: match.teamBFlagUrl,
+                    alignRight: true,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 13),
+
+            Container(
+              width: double.infinity,
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.gold.withOpacity(0.0),
+                    AppTheme.gold.withOpacity(0.24),
+                    AppTheme.teal.withOpacity(0.16),
+                    AppTheme.gold.withOpacity(0.0),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 11),
+
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    match.stage.isEmpty ? 'Completed match' : match.stage,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _MiniInfoPill(
+                  icon: Icons.emoji_events_rounded,
+                  label: '$totalShown winners',
+                  color: AppTheme.gold,
+                ),
+                const SizedBox(width: 8),
+                _MiniInfoPill(
+                  icon: Icons.sports_soccer_rounded,
+                  label: 'Final ${match.scoreText}',
+                  color: AppTheme.teal,
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TopTenHeader extends StatelessWidget {
+  final int totalShown;
+  final bool loading;
+
+  const _TopTenHeader({
+    required this.totalShown,
+    required this.loading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          height: 33,
+          width: 33,
+          decoration: BoxDecoration(
+            color: AppTheme.gold.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(
+            Icons.workspace_premium_rounded,
+            color: AppTheme.gold,
+            size: 18,
+          ),
+        ),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Top 10 Winners',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                loading
+                    ? 'Loading winners...'
+                    : '$totalShown exact-score winners shown',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WinnerRankTile extends StatelessWidget {
+  final int rank;
+  final PredictionModel item;
+  final PredictionMatchFilter? match;
+
+  const _WinnerRankTile({
+    required this.rank,
+    required this.item,
     required this.match,
   });
 
   @override
   Widget build(BuildContext context) {
-    final dateText = match.matchStartAt == null
-        ? 'Latest completed match'
-        : DateTimeUtils.dateOnly(match.matchStartAt);
+    final isTop = rank == 1;
 
     return Container(
-      width: double.infinity,
+      padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF38BDF8),
-            Color(0xFF18D6B1),
-            Color(0xFFFFB84D),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.teal.withOpacity(0.14),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(1.15),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(27),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(27),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  const Color(0xFF10263A).withOpacity(0.96),
-                  const Color(0xFF071827).withOpacity(0.98),
-                  const Color(0xFF050E18).withOpacity(0.99),
+        borderRadius: BorderRadius.circular(21),
+        gradient: LinearGradient(
+          colors: isTop
+              ? [
+                  AppTheme.gold.withOpacity(0.15),
+                  Colors.white.withOpacity(0.05),
+                ]
+              : [
+                  Colors.white.withOpacity(0.09),
+                  Colors.white.withOpacity(0.035),
                 ],
+        ),
+        border: Border.all(
+          color: isTop
+              ? AppTheme.gold.withOpacity(0.22)
+              : Colors.white.withOpacity(0.075),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _UserAvatar(
+                name: item.displayUserName,
+                avatarUrl: item.userAvatarUrl,
+                size: 43,
+                rankNo: rank,
+                isWinner: isTop,
               ),
-            ),
-            child: Column(
-              children: [
-                Row(
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _SmallPill(
-                      icon: Icons.sports_soccer_rounded,
-                      label: 'LATEST MATCH',
-                      color: AppTheme.gold,
-                    ),
-                    const Spacer(),
                     Text(
-                      dateText,
+                      item.displayUserName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12.8,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'Predicted ${match?.teamAShortName ?? match?.teamAName ?? 'A'} ${item.teamAScore} - ${item.teamBScore} ${match?.teamBShortName ?? match?.teamBName ?? 'B'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white54,
-                        fontSize: 10.5,
+                        fontSize: 10.2,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: _MatchTeam(
-                        name: match.teamAName,
-                        shortName: match.teamAShort,
-                        flagUrl: match.teamAFlagUrl,
-                        alignRight: false,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _ResultScoreBox(
-                      teamAScore: match.teamAScore,
-                      teamBScore: match.teamBScore,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _MatchTeam(
-                        name: match.teamBName,
-                        shortName: match.teamBShort,
-                        flagUrl: match.teamBFlagUrl,
-                        alignRight: true,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  height: 1.1,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        AppTheme.gold.withOpacity(0.0),
-                        AppTheme.gold.withOpacity(0.22),
-                        AppTheme.teal.withOpacity(0.18),
-                        AppTheme.gold.withOpacity(0.0),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 11),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        match.stage.isEmpty ? 'Completed match' : match.stage,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
+                    const SizedBox(height: 5),
                     Text(
-                      match.matchTitle.isEmpty ? 'Result declared' : match.matchTitle,
+                      _scorerText(item),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white38,
-                        fontSize: 10.5,
+                        fontSize: 9.8,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${item.points}',
+                    style: TextStyle(
+                      color: isTop ? AppTheme.gold : AppTheme.teal,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'pts',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          Row(
+            children: [
+              _BreakdownPill(
+                label: 'Score',
+                value: item.exactScorePoints,
+                color: AppTheme.teal,
+              ),
+              const SizedBox(width: 7),
+              _BreakdownPill(
+                label: 'Scorer',
+                value: item.playerPoints,
+                color: AppTheme.blue,
+              ),
+              const SizedBox(width: 7),
+              _BreakdownPill(
+                label: 'Time',
+                value: item.timePoints,
+                color: AppTheme.gold,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BreakdownPill extends StatelessWidget {
+  final String label;
+  final int value;
+  final Color color;
+
+  const _BreakdownPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 7),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.085),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: color.withOpacity(0.16)),
+        ),
+        child: Text(
+          '$label: $value',
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: color,
+            fontSize: 9.6,
+            fontWeight: FontWeight.w900,
           ),
         ),
       ),
@@ -544,12 +859,10 @@ class _MatchTeam extends StatelessWidget {
 }
 
 class _ResultScoreBox extends StatelessWidget {
-  final int teamAScore;
-  final int teamBScore;
+  final String scoreText;
 
   const _ResultScoreBox({
-    required this.teamAScore,
-    required this.teamBScore,
+    required this.scoreText,
   });
 
   @override
@@ -578,7 +891,7 @@ class _ResultScoreBox extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Text(
-        '$teamAScore - $teamBScore',
+        scoreText,
         style: const TextStyle(
           color: Color(0xFF2B1908),
           fontSize: 22,
@@ -586,284 +899,6 @@ class _ResultScoreBox extends StatelessWidget {
           height: 1,
           letterSpacing: -0.5,
         ),
-      ),
-    );
-  }
-}
-
-class _WinnerSummaryCard extends StatelessWidget {
-  final LatestMatchWinnersResult result;
-
-  const _WinnerSummaryCard({
-    required this.result,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final winners = result.winners;
-    final title = winners.length == 1 ? 'Winner' : 'Winners';
-    final subtitle = winners.length == 1
-        ? 'Highest points for this latest match'
-        : '${winners.length} users tied with highest points';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 15, 14, 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
-        gradient: LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.12),
-            Colors.white.withOpacity(0.045),
-          ],
-        ),
-        border: Border.all(
-          color: AppTheme.gold.withOpacity(0.18),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.gold.withOpacity(0.12),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.workspace_premium_rounded,
-                color: AppTheme.gold,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              Container(
-                height: 30,
-                padding: const EdgeInsets.symmetric(horizontal: 11),
-                decoration: BoxDecoration(
-                  color: AppTheme.gold.withOpacity(0.13),
-                  borderRadius: BorderRadius.circular(100),
-                  border: Border.all(
-                    color: AppTheme.gold.withOpacity(0.22),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '${result.highestPoints} pts',
-                  style: const TextStyle(
-                    color: AppTheme.gold,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              subtitle,
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          const SizedBox(height: 13),
-          for (int i = 0; i < winners.length; i++) ...[
-            _WinnerPersonRow(item: winners[i]),
-            if (i != winners.length - 1)
-              Divider(
-                height: 14,
-                color: Colors.white.withOpacity(0.07),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _WinnerPersonRow extends StatelessWidget {
-  final LatestMatchWinnerItem item;
-
-  const _WinnerPersonRow({
-    required this.item,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _UserAvatar(
-          name: item.fullName,
-          avatarUrl: item.avatarUrl,
-          size: 46,
-          rankNo: item.rankNo,
-          isWinner: true,
-        ),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.fullName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13.8,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _scorerText(item),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 10.3,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          '${item.predictedTeamAScore} - ${item.predictedTeamBScore}',
-          style: const TextStyle(
-            color: AppTheme.gold,
-            fontSize: 15,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PredictionRankTile extends StatelessWidget {
-  final LatestMatchWinnerItem item;
-  final WinnerMatchInfo match;
-
-  const _PredictionRankTile({
-    required this.item,
-    required this.match,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(11),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(21),
-        gradient: LinearGradient(
-          colors: item.isWinner
-              ? [
-                  AppTheme.gold.withOpacity(0.15),
-                  Colors.white.withOpacity(0.05),
-                ]
-              : [
-                  Colors.white.withOpacity(0.09),
-                  Colors.white.withOpacity(0.035),
-                ],
-        ),
-        border: Border.all(
-          color: item.isWinner
-              ? AppTheme.gold.withOpacity(0.20)
-              : Colors.white.withOpacity(0.075),
-        ),
-      ),
-      child: Row(
-        children: [
-          _UserAvatar(
-            name: item.fullName,
-            avatarUrl: item.avatarUrl,
-            size: 43,
-            rankNo: item.rankNo,
-            isWinner: item.isWinner,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.fullName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12.8,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  'Predicted ${match.teamAShort} ${item.predictedTeamAScore} - ${item.predictedTeamBScore} ${match.teamBShort}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 10.2,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  _scorerText(item),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 9.8,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${item.totalPoints}',
-                style: TextStyle(
-                  color: item.isWinner ? AppTheme.gold : AppTheme.teal,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'pts',
-                style: TextStyle(
-                  color: Colors.white38,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -933,7 +968,6 @@ class _UserAvatar extends StatelessWidget {
           bottom: -3,
           child: Container(
             height: 21,
-            //minWidth: 21,
             padding: const EdgeInsets.symmetric(horizontal: 5),
             decoration: BoxDecoration(
               color: isWinner ? AppTheme.gold : const Color(0xFF10263A),
@@ -952,65 +986,6 @@ class _UserAvatar extends StatelessWidget {
                 fontWeight: FontWeight.w900,
               ),
             ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  final String subtitle;
-
-  const _SectionTitle({
-    required this.title,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          height: 33,
-          width: 33,
-          decoration: BoxDecoration(
-            color: AppTheme.gold.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(
-            Icons.compare_arrows_rounded,
-            color: AppTheme.gold,
-            size: 18,
-          ),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15.5,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
           ),
         ),
       ],
@@ -1037,9 +1012,7 @@ class _SmallPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withOpacity(0.13),
         borderRadius: BorderRadius.circular(100),
-        border: Border.all(
-          color: color.withOpacity(0.22),
-        ),
+        border: Border.all(color: color.withOpacity(0.22)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1061,6 +1034,76 @@ class _SmallPill extends StatelessWidget {
   }
 }
 
+class _MiniInfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _MiniInfoPill({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Flexible(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.09),
+          borderRadius: BorderRadius.circular(100),
+          border: Border.all(color: color.withOpacity(0.17)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 14),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NativeLoadingCard extends StatelessWidget {
+  const _NativeLoadingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 160,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: const Color(0xFF091827).withOpacity(0.88),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: const SizedBox(
+        height: 28,
+        width: 28,
+        child: CircularProgressIndicator(
+          strokeWidth: 3,
+          color: AppTheme.gold,
+        ),
+      ),
+    );
+  }
+}
+
 class _NoCompletedMatchCard extends StatelessWidget {
   const _NoCompletedMatchCard();
 
@@ -1070,7 +1113,7 @@ class _NoCompletedMatchCard extends StatelessWidget {
       icon: Icons.sports_soccer_rounded,
       title: 'No completed match yet',
       message:
-          'Winners will be calculated after the latest match has a final score.',
+          'Winners will appear after a completed match has exact-score predictions.',
     );
   }
 }
@@ -1082,27 +1125,9 @@ class _NoPredictionsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return const _MessageCard(
       icon: Icons.person_search_rounded,
-      title: 'No predictions found',
+      title: 'No winners found',
       message:
-          'There are no submitted predictions for the latest completed match.',
-    );
-  }
-}
-
-class _NotEvaluatedCard extends StatelessWidget {
-  final WinnerMatchInfo match;
-
-  const _NotEvaluatedCard({
-    required this.match,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _MessageCard(
-      icon: Icons.pending_actions_rounded,
-      title: 'Winner not calculated yet',
-      message:
-          'Predictions for ${match.teamAName} vs ${match.teamBName} are available, but points are not evaluated yet.',
+          'No exact-score winner found for this selected completed match.',
     );
   }
 }
@@ -1130,9 +1155,7 @@ class _MessageCard extends StatelessWidget {
             Colors.white.withOpacity(0.040),
           ],
         ),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.08),
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         children: [
@@ -1186,9 +1209,7 @@ class _StateCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF091827).withOpacity(0.88),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.08),
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         children: [
@@ -1226,17 +1247,102 @@ class _StateCard extends StatelessWidget {
   }
 }
 
-String _scorerText(LatestMatchWinnerItem item) {
+class _WinnersBackground extends StatelessWidget {
+  final Widget child;
+
+  const _WinnersBackground({
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF071C2D),
+            Color(0xFF06251F),
+            Color(0xFF06111E),
+            Color(0xFF02070D),
+          ],
+          stops: [0.0, 0.35, 0.70, 1.0],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -130,
+            right: -120,
+            child: _GlowBlob(
+              color: AppTheme.gold,
+              size: 320,
+              opacity: 0.16,
+            ),
+          ),
+          Positioned(
+            top: 210,
+            left: -160,
+            child: _GlowBlob(
+              color: AppTheme.teal,
+              size: 300,
+              opacity: 0.11,
+            ),
+          ),
+          Positioned(
+            bottom: 90,
+            right: -180,
+            child: _GlowBlob(
+              color: AppTheme.blue,
+              size: 320,
+              opacity: 0.08,
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _GlowBlob extends StatelessWidget {
+  final Color color;
+  final double size;
+  final double opacity;
+
+  const _GlowBlob({
+    required this.color,
+    required this.size,
+    required this.opacity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: size,
+      width: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color.withOpacity(opacity),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(opacity),
+            blurRadius: 110,
+            spreadRadius: 46,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _scorerText(PredictionModel item) {
   final scorer = item.scorerName?.trim();
-  final team = item.scorerTeamName?.trim();
 
   if (scorer == null || scorer.isEmpty) {
-    return 'No goal scorer selected';
+    return 'No scorer selected';
   }
 
-  if (team == null || team.isEmpty) {
-    return 'Scorer: $scorer';
-  }
-
-  return 'Scorer: $scorer • $team';
+  return 'Scorer: $scorer';
 }

@@ -406,7 +406,7 @@ class _MatchPredictionScreenState extends State<MatchPredictionScreen> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<PlayerModel>(
-            value: selectedScorer,
+            initialValue: selectedScorer,
             isExpanded: true,
             dropdownColor: AppTheme.surface2,
             iconEnabledColor: Colors.white70,
@@ -566,7 +566,7 @@ class _MatchPredictionScreenState extends State<MatchPredictionScreen> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             sliver: SliverList.separated(
               itemCount: list.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 7),
+              separatorBuilder: (_, _) => const SizedBox(height: 7),
               itemBuilder: (context, index) {
                 return _SimpleParticipantRow(
                   item: list[index],
@@ -1437,7 +1437,7 @@ class _ScoreDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<int>(
-      value: value,
+      initialValue: value,
       dropdownColor: AppTheme.surface2,
       iconEnabledColor: Colors.white70,
       style: const TextStyle(

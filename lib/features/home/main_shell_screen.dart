@@ -5,8 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../fixtures/fixtures_screen.dart';
 import '../home/home_screen.dart';
-import '../leaderboard/leaderboard_screen.dart';
 import '../predictions/my_predictions_screen.dart';
+import '../rules/rules_screen.dart';
 import '../winners/winners_screen.dart';
 
 class MainShellScreen extends StatelessWidget {
@@ -19,9 +19,9 @@ class MainShellScreen extends StatelessWidget {
 
   int _selectedIndex(String location) {
     if (location.startsWith('/fixtures')) return 0;
-    if (location.startsWith('/my-predictions')) return 1;
+    if (location.startsWith('/rules')) return 1;
     if (location == '/' || location.startsWith('/home')) return 2;
-    if (location.startsWith('/leaderboard')) return 3;
+    if (location.startsWith('/my-predictions')) return 3;
     if (location.startsWith('/winners')) return 4;
 
     return 2;
@@ -32,11 +32,11 @@ class MainShellScreen extends StatelessWidget {
       case 0:
         return '/fixtures';
       case 1:
-        return '/my-predictions';
+        return '/rules';
       case 2:
         return '/home';
       case 3:
-        return '/leaderboard';
+        return '/my-predictions';
       case 4:
         return '/winners';
       default:
@@ -153,10 +153,10 @@ class _BottomRectangleNavBar extends StatelessWidget {
         color: Color(0xFFFFB84D),
       ),
       _NavItem(
-        label: 'Predict',
-        icon: Icons.center_focus_weak_rounded,
-        activeIcon: Icons.center_focus_strong_rounded,
-        color: Color(0xFF57A6FF),
+        label: 'Rules',
+        icon: Icons.rule_outlined,
+        activeIcon: Icons.rule_rounded,
+        color: Color(0xFFFF7A3D),
       ),
       _NavItem(
         label: 'Home',
@@ -165,10 +165,10 @@ class _BottomRectangleNavBar extends StatelessWidget {
         color: AppTheme.teal,
       ),
       _NavItem(
-        label: 'Leaders',
-        icon: Icons.leaderboard_outlined,
-        activeIcon: Icons.leaderboard_rounded,
-        color: Color(0xFFFF7A3D),
+        label: 'Predict',
+        icon: Icons.center_focus_weak_rounded,
+        activeIcon: Icons.center_focus_strong_rounded,
+        color: Color(0xFF57A6FF),
       ),
       _NavItem(
         label: 'Winners',
@@ -422,8 +422,8 @@ class MyPredictionsScreenTab extends MyPredictionsScreen {
   const MyPredictionsScreenTab({super.key});
 }
 
-class LeaderboardScreenTab extends LeaderboardScreen {
-  const LeaderboardScreenTab({super.key});
+class RulesScreenTab extends RulesScreen {
+  const RulesScreenTab({super.key});
 }
 
 class WinnersScreenTab extends WinnersScreen {

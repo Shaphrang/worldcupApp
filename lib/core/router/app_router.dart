@@ -31,8 +31,8 @@ final appRouter = GoRouter(
           builder: (context, state) => const MyPredictionsScreenTab(),
         ),
         GoRoute(
-          path: '/leaderboard',
-          builder: (context, state) => const LeaderboardScreenTab(),
+          path: '/rules',
+          builder: (context, state) => const RulesScreenTab(),
         ),
         GoRoute(
           path: '/winners',
