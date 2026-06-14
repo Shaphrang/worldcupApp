@@ -4,6 +4,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../services/home_service.dart';
+
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -38,10 +40,11 @@ class _SplashScreenState extends State<SplashScreen>
     try {
       await Future.wait([
         _preloadSplashImage(),
-        Future.delayed(const Duration(milliseconds: 2800)),
-      ]);
+        HomeService.instance.prepareHome(),
+        Future.delayed(const Duration(milliseconds: 1200)),
+      ]).timeout(const Duration(seconds: 8));
     } catch (_) {
-      await Future.delayed(const Duration(milliseconds: 2200));
+      await Future.delayed(const Duration(milliseconds: 700));
     }
 
     if (!mounted || _navigated) return;

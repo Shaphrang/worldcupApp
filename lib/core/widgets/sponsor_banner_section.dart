@@ -19,6 +19,7 @@ class SponsorBannerSection extends StatefulWidget {
   final bool showSponsoredLabel;
   final bool openLinkOnTap;
   final void Function(SponsorBannerModel banner)? onBannerTap;
+  final List<SponsorBannerModel>? initialBanners;
 
   const SponsorBannerSection({
     super.key,
@@ -33,7 +34,24 @@ class SponsorBannerSection extends StatefulWidget {
     this.showSponsoredLabel = true,
     this.openLinkOnTap = true,
     this.onBannerTap,
+    this.initialBanners,
   });
+
+  const SponsorBannerSection.fromBanners({
+    super.key,
+    required List<SponsorBannerModel> banners,
+    required this.placement,
+    this.slot = SponsorBannerSlot.top,
+    this.includeGlobal = true,
+    this.height = 118,
+    this.limit = 5,
+    this.autoPlay = true,
+    this.margin,
+    this.borderRadius,
+    this.showSponsoredLabel = true,
+    this.openLinkOnTap = true,
+    this.onBannerTap,
+  }) : initialBanners = banners;
 
   @override
   State<SponsorBannerSection> createState() => _SponsorBannerSectionState();
@@ -50,7 +68,15 @@ class _SponsorBannerSectionState extends State<SponsorBannerSection> {
   @override
   void initState() {
     super.initState();
-    _future = _loadBannersAndStartAutoPlay();
+    final initial = widget.initialBanners;
+    if (initial != null) {
+      _future = Future.value(initial);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startAutoPlay(initial.length);
+      });
+    } else {
+      _future = _loadBannersAndStartAutoPlay();
+    }
   }
 
   @override
@@ -61,7 +87,8 @@ class _SponsorBannerSectionState extends State<SponsorBannerSection> {
         oldWidget.slot != widget.slot ||
         oldWidget.limit != widget.limit ||
         oldWidget.includeGlobal != widget.includeGlobal ||
-        oldWidget.autoPlay != widget.autoPlay;
+        oldWidget.autoPlay != widget.autoPlay ||
+        oldWidget.initialBanners != widget.initialBanners;
 
     if (!shouldReload) return;
 
@@ -74,7 +101,15 @@ class _SponsorBannerSectionState extends State<SponsorBannerSection> {
     }
 
     setState(() {
+      final initial = widget.initialBanners;
+    if (initial != null) {
+      _future = Future.value(initial);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startAutoPlay(initial.length);
+      });
+    } else {
       _future = _loadBannersAndStartAutoPlay();
+    }
     });
   }
 
