@@ -15,6 +15,7 @@ class TodaysMatchesSection extends StatelessWidget {
   final Future<void> Function() onRetry;
   final VoidCallback onViewAll;
   final ValueChanged<FixtureModel> onMatchTap;
+  
 
   const TodaysMatchesSection({
     super.key,
@@ -35,7 +36,7 @@ class TodaysMatchesSection extends StatelessWidget {
       children: [
         _SectionHeader(
           title: title,
-          subtitle: 'World Cup fixtures',
+          subtitle: 'Next 5 World Cup fixtures',
           count: visibleMatches.length,
           onViewAll: onViewAll,
         ),
@@ -304,12 +305,28 @@ class _FixtureListRow extends StatelessWidget {
     required this.onTap,
   });
 
+  bool get _isLocked {
+    final status = match.status.trim().toLowerCase();
+    final now = DateTime.now();
+
+    return match.isLocked ||
+        !now.isBefore(match.predictionLockAt) ||
+        status == 'locked' ||
+        status == 'live' ||
+        status == 'ongoing' ||
+        status == 'completed' ||
+        status == 'finalized' ||
+        status == 'cancelled';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isLocked = _isLocked;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: isLocked ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
           child: Column(
@@ -322,7 +339,9 @@ class _FixtureListRow extends StatelessWidget {
                     child: _StageText(stage: match.stage),
                   ),
                   const SizedBox(width: 8),
-                  _PredictNowPill(onTap: onTap),
+                  isLocked
+                      ? const _LockedPill()
+                      : _PredictNowPill(onTap: onTap),
                 ],
               ),
               const SizedBox(height: 10),
@@ -469,6 +488,45 @@ class _PredictNowPill extends StatelessWidget {
             fontWeight: FontWeight.w900,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LockedPill extends StatelessWidget {
+  const _LockedPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(100),
+        color: Colors.white.withOpacity(0.075),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.12),
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.lock_rounded,
+            size: 12,
+            color: Colors.white.withOpacity(0.62),
+          ),
+          const SizedBox(width: 5),
+          const Text(
+            'Locked',
+            style: TextStyle(
+              color: Colors.white60,
+              fontSize: 10.3,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }

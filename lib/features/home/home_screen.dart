@@ -15,6 +15,7 @@ import 'widgets/latest_winners_section.dart';
 import 'widgets/leaders_section.dart';
 import 'widgets/popular_picks_section.dart';
 import 'widgets/todays_matches_section.dart';
+import 'widgets/home_prize_pool_mini_section.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -118,6 +119,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 118,
                       autoPlay: true,
                     ),
+                    const SizedBox(height: 16),
+                    const SizedBox(height: 16),
+
+                    HomePrizePoolMiniSection(
+                      onPredictTap: (matchId) {
+                        context.push('/fixtures/$matchId');
+                      },
+                    ),
+
                     const SizedBox(height: 16),
                     TodaysMatchesSection(
                       title: data.isShowingTodayMatches

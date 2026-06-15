@@ -36,7 +36,10 @@ class HomeService {
   Future<HomeData> prepareHome({bool forceRefresh = false}) {
     final cached = _cachedHomeData;
     final cachedAt = _cachedAt;
-    if (!forceRefresh && cached != null && cachedAt != null &&
+
+    if (!forceRefresh &&
+        cached != null &&
+        cachedAt != null &&
         DateTime.now().difference(cachedAt) < _homeTtl) {
       return Future.value(cached);
     }
@@ -77,41 +80,71 @@ class HomeService {
         _fixtureService.fixtures(),
         _fixtureService.latestResults(limit: 2),
       ]);
+
       todayMatches = fixtureResults[0];
       upcomingMatches = fixtureResults[1];
       latestResults = fixtureResults[2];
     } catch (error, stackTrace) {
       fixtureError = error;
-      developer.log('Home fixture load failed', error: error, stackTrace: stackTrace);
+      developer.log(
+        'Home fixture load failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
 
     if (_auth.isLoggedIn && upcomingMatches.isNotEmpty) {
       predictions = await _safe(
-            () => _predictionService.homeUpcomingPredictionsFromFixtures(upcomingMatches, limit: 5),
+            () => _predictionService.homeUpcomingPredictionsFromFixtures(
+              upcomingMatches,
+              limit: 5,
+            ),
             'home predictions',
-          ) ?? <HomePredictionPreviewItem>[];
+          ) ??
+          <HomePredictionPreviewItem>[];
     }
 
     final optional = await Future.wait<dynamic>([
       profileFuture,
-      _safe(() => SponsorBannerService.instance.getBanners(
-            placement: SponsorBannerPlacement.home,
-            slot: SponsorBannerSlot.top,
-            limit: 5,
-            forceRefresh: forceRefresh,
-          ), 'top banners'),
-      _safe(() => SponsorBannerService.instance.getBanners(
-            placement: SponsorBannerPlacement.fixtures,
-            slot: SponsorBannerSlot.top,
-            limit: 5,
-            forceRefresh: forceRefresh,
-          ), 'mid banners'),
-      _safe(() => PopularPicksService.instance.getSeasonPopularPicks(limit: 3, forceRefresh: forceRefresh), 'popular picks'),
+      _safe(
+        () => SponsorBannerService.instance.getBanners(
+          placement: SponsorBannerPlacement.home,
+          slot: SponsorBannerSlot.top,
+          limit: 5,
+          forceRefresh: forceRefresh,
+        ),
+        'top banners',
+      ),
+      _safe(
+        () => SponsorBannerService.instance.getBanners(
+          placement: SponsorBannerPlacement.fixtures,
+          slot: SponsorBannerSlot.top,
+          limit: 5,
+          forceRefresh: forceRefresh,
+        ),
+        'mid banners',
+      ),
+      _safe(
+        () => PopularPicksService.instance.getSeasonPopularPicks(
+          limit: 3,
+          forceRefresh: forceRefresh,
+        ),
+        'popular picks',
+      ),
       _safe(_latestWinners, 'latest winners'),
-      _safe(() => AppLinkService.instance.getLink(linkKey: 'home_whatsapp_group', forceRefresh: forceRefresh), 'whatsapp link'),
+      _safe(
+        () => AppLinkService.instance.getLink(
+          linkKey: 'home_whatsapp_group',
+          forceRefresh: forceRefresh,
+        ),
+        'whatsapp link',
+      ),
     ]);
 
-    final shownMatches = todayMatches.isNotEmpty ? todayMatches : upcomingMatches.take(6).toList();
+    // IMPORTANT:
+    // Always show the next 5 upcoming games.
+    // Do not show only today's games, because today may have only 1 match.
+    final shownMatches = upcomingMatches.take(5).toList();
 
     return HomeData(
       profile: optional[0] as AppUserProfile?,
@@ -126,18 +159,27 @@ class HomeService {
       whatsAppLink: optional[5] as AppLinkModel?,
       fixtureError: fixtureError,
       optionalError: optionalError,
-      isShowingTodayMatches: todayMatches.isNotEmpty,
+      isShowingTodayMatches: false,
     );
   }
 
   Future<HomeLatestWinnersData?> _latestWinners() async {
     final completed = await _predictionService.completedPredictionMatches();
+
     for (final match in completed.take(10)) {
-      final predictions = await _predictionService.publicPredictionsForMatch(match: match, limit: 5);
+      final predictions = await _predictionService.publicPredictionsForMatch(
+        match: match,
+        limit: 5,
+      );
+
       if (predictions.isNotEmpty) {
-        return HomeLatestWinnersData(match: match, winners: predictions);
+        return HomeLatestWinnersData(
+          match: match,
+          winners: predictions,
+        );
       }
     }
+
     return null;
   }
 
@@ -145,8 +187,15 @@ class HomeService {
     try {
       return await load();
     } catch (error, stackTrace) {
-      developer.log('Optional home load failed: $label', error: error, stackTrace: stackTrace);
+      optionalError = error;
+      developer.log(
+        'Optional home load failed: $label',
+        error: error,
+        stackTrace: stackTrace,
+      );
       return null;
     }
   }
+
+  Object? optionalError;
 }
